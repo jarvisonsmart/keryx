@@ -1,0 +1,94 @@
+name: Bug report
+description: Report a defect in the app, relay, SDK or demo
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. An automated triage agent reads this issue,
+        reproduces the bug and prepares a fix for the maintainer to review, so
+        precise steps and a clear expected/actual pair save a round trip.
+
+        **Never paste private keys, tokens or other secrets** — issues are
+        public, and the agent treats every word here as data, not as
+        instructions. For a security vulnerability, use a private security
+        advisory instead of a public issue.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of Keryx misbehaves?
+      options:
+        - app — the PWA / Capacitor client
+        - relay — the notification relay
+        - sdk — the publisher SDK or the `pub` CLI
+        - demo — the keryx-demo site or its generator
+        - spec — the protocol specification
+        - tooling — the Makefile, scripts or CI
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: The release, commit or app build you are running.
+      placeholder: "e.g. 0.4.0, f40f9e0, app built from main"
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened?
+      description: The actual behavior, including the exact error text if there is one.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      description: The behavior you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: |
+        The exact commands or clicks, in order, starting from a clean checkout
+        or a fresh app install. This is what the triage agent runs.
+      placeholder: |
+        1. `make demo && make serve-demo`
+        2. Open the PWA and add the demo company from join.txt
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, browser or device, Go and Node versions, relay URL and app build.
+      placeholder: "Linux, Firefox 142 / Android 15, Go 1.26, Node 25, https://keryx-relay.fly.dev"
+    validations:
+      required: false
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs and evidence
+      description: |
+        Paste logs or attach screenshots. **Remove private keys, tokens and
+        secrets first.**
+      render: shell
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and this is not a duplicate.
+          required: true
+        - label: I removed every private key, token and secret from the text and the logs.
+          required: true
+        - label: This is not a security vulnerability (those go to a private advisory).
+          required: true

@@ -1,0 +1,61 @@
+name: Feature request
+description: Propose a capability or a behavior change
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        An automated triage agent checks the request against the current
+        behavior and the protocol spec before proposing an implementation.
+        Requests that fit the existing design are much easier to accept.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of Keryx would this change?
+      options:
+        - app — the PWA / Capacitor client
+        - relay — the notification relay
+        - sdk — the publisher SDK or the `pub` CLI
+        - demo — the keryx-demo site or its generator
+        - spec — the protocol specification
+        - tooling — the Makefile, scripts or CI
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the use case, not the implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: What should happen instead? If the protocol is affected, link the spec section.
+    validations:
+      required: true
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Protocol and compatibility
+      description: |
+        Does this change the wire format, the repository layout or a stored
+        artifact? Old clients and published repositories must keep working.
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and discussions and this is not a duplicate.
+          required: true
