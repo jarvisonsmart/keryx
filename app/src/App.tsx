@@ -80,6 +80,7 @@ export default function App() {
         onCancel={() => {
           if (view.repairOrigin) setView({ t: 'company', origin: view.repairOrigin });
           else if (view.from === 'contacts' || companies.length > 1) setView({ t: 'contacts' });
+          else if (companies.length === 1) setView({ t: 'company', origin: companies[0].origin });
           else setView({ t: 'start' });
         }}
       />

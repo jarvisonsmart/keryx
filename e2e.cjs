@@ -142,6 +142,14 @@ async function driveEnableFlow(page, joinUrl) {
   const cont = page.getByRole('button', { name: 'Continue' });
   if (await cont.count()) await cont.click();
   await page.getByRole('button', { name: 'Settings', exact: true }).waitFor({ timeout: 20000 });
+  await page.getByRole('button', { name: 'Add company', exact: true }).click();
+  await page.getByRole('button', { name: 'Paste a link', exact: true }).click();
+  await page.getByPlaceholder('Paste the company link or domain').fill('not a company link');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByText('This link is not a valid company link.', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).waitFor();
 }
 
 (async () => {
