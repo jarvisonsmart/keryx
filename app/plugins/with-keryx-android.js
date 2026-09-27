@@ -4,7 +4,7 @@
  * - release signing from the CI keystore env vars — every published APK must
  *   be signed with this key, or existing installs can never update;
  * - network security: release builds are HTTPS-only; debug builds permit
- *   cleartext (Metro, the plain-HTTP local demo). The JS layer additionally
+ *   cleartext only for local development hosts. The JS layer additionally
  *   gates http:// joins on the debuggable flag (lib/build.ts).
  */
 const fs = require('node:fs');
@@ -22,10 +22,21 @@ const RELEASE_SIGNING = `
             }
         }`;
 
-function networkConfig(cleartext) {
+function networkConfig(debug) {
+  const hosts = ['localhost', '127.0.0.1', '::1', '10.0.2.2'];
+  for (const host of (process.env.KERYX_DEV_HOSTS ?? '').split(',').filter(Boolean)) {
+    const parts = host.split('.').map(Number);
+    const local = parts.length === 4 && parts.every((n) => Number.isInteger(n) && n >= 0 && n <= 255) &&
+      (parts[0] === 10 || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || (parts[0] === 192 && parts[1] === 168));
+    if (!local || !/^[0-9.]+$/.test(host)) throw new Error('KERYX_DEV_HOSTS must contain private IPv4 addresses');
+    hosts.push(host);
+  }
   return `<?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <base-config cleartextTrafficPermitted="${cleartext}" />
+    <base-config cleartextTrafficPermitted="false" />${debug ? `
+    <domain-config cleartextTrafficPermitted="true">
+${hosts.map((host) => `        <domain includeSubdomains="false">${host}</domain>`).join('\n')}
+    </domain-config>` : ''}
 </network-security-config>
 `;
 }
