@@ -396,8 +396,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (result.endpoint === 'failed') {
           sessionTestPending.current = false;
           setNotification({ kind: 'failed', leg: result.leg });
+        } else if (result.endpoint === 'delivered') {
+          sessionTestPending.current = false;
+          setFreshTestAt(Date.now());
+          setNotification({ kind: 'ok', testedAt: result.testedAt });
         } else {
-          // delivered now or still in flight: the green tail when it lands
           await refreshNotificationState();
         }
         return result;
@@ -413,6 +416,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (result.endpoint === 'failed') {
           sessionTestPending.current = false;
           setNotification({ kind: 'failed', leg: result.leg });
+        } else if (result.endpoint === 'delivered') {
+          sessionTestPending.current = false;
+          setFreshTestAt(Date.now());
+          setNotification({ kind: 'ok', testedAt: result.testedAt });
         } else {
           await refreshNotificationState();
         }
