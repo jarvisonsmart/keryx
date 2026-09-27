@@ -68,31 +68,34 @@ async function put(db: SQLite.SQLiteDatabase, store: StoreName, value: object): 
   );
 }
 
-let writes: Promise<unknown> = Promise.resolve();
+let operations: Promise<unknown> = Promise.resolve();
+
+function run<T>(action: (db: SQLite.SQLiteDatabase) => Promise<T>): Promise<T> {
+  const result = operations.then(async () => action(await sqlite()));
+  operations = result.catch(() => undefined);
+  return result;
+}
 
 function write<T>(action: (txn: SQLite.SQLiteDatabase) => Promise<T>): Promise<T> {
-  const result = writes.then(async () => {
-    const db = await sqlite();
+  return run(async (db) => {
     let value!: T;
     await db.withExclusiveTransactionAsync(async (txn) => { value = await action(txn); });
     return value;
   });
-  writes = result.catch(() => undefined);
-  return result;
 }
 
 export function openAppDb(): KeyValueDb {
   return {
     async get(store, key) {
-      const row = await (await sqlite()).getFirstAsync<Row>(`SELECT value FROM ${store} WHERE key = ?`, storageKey(key));
+      const row = await run((db) => db.getFirstAsync<Row>(`SELECT value FROM ${store} WHERE key = ?`, storageKey(key)));
       return row ? decode(store, row.value) : undefined;
     },
     async getAll(store) {
-      const rows = await (await sqlite()).getAllAsync<Row>(`SELECT value FROM ${store} ORDER BY key`);
+      const rows = await run((db) => db.getAllAsync<Row>(`SELECT value FROM ${store} ORDER BY key`));
       return rows.map((r) => decode(store, r.value));
     },
     async getAllByOrigin(store, origin) {
-      const rows = await (await sqlite()).getAllAsync<Row>(`SELECT value FROM ${store} WHERE origin = ? ORDER BY key`, origin);
+      const rows = await run((db) => db.getAllAsync<Row>(`SELECT value FROM ${store} WHERE origin = ? ORDER BY key`, origin));
       return rows.map((r) => decode(store, r.value));
     },
     putMany(store, values) {

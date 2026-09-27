@@ -7,15 +7,26 @@ vi.mock('expo-sqlite', () => ({
     // The iOS bridge binds strings with length -1, ending at the first NUL.
     const args = (values: SQLInputValue[]) => values.map((v) => typeof v === 'string' ? v.split('\0')[0] : v);
     let writing = false;
-    const adapter = {
+    const txn = {
       async execAsync(sql: string) { db.exec(sql); },
       async runAsync(sql: string, ...values: SQLInputValue[]) { return db.prepare(sql).run(...args(values)); },
       async getFirstAsync(sql: string, ...values: SQLInputValue[]) { return db.prepare(sql).get(...args(values)); },
       async getAllAsync(sql: string, ...values: SQLInputValue[]) { return db.prepare(sql).all(...args(values)); },
-      async withExclusiveTransactionAsync(fn: (txn: unknown) => Promise<void>) {
+    };
+    const adapter = {
+      ...txn,
+      async getFirstAsync(sql: string, ...values: SQLInputValue[]) {
+        if (writing) throw new Error('database is locked');
+        return txn.getFirstAsync(sql, ...values);
+      },
+      async getAllAsync(sql: string, ...values: SQLInputValue[]) {
+        if (writing) throw new Error('database is locked');
+        return txn.getAllAsync(sql, ...values);
+      },
+      async withExclusiveTransactionAsync(fn: (connection: unknown) => Promise<void>) {
         if (writing) throw new Error('database is locked');
         writing = true;
-        try { await fn(adapter); } finally { writing = false; }
+        try { await new Promise((resolve) => setTimeout(resolve, 1)); await fn(txn); } finally { writing = false; }
       },
     };
     return adapter;
@@ -47,6 +58,19 @@ describe('SQLite persistence', () => {
     await Promise.all(Array.from({ length: 8 }, () => db.update<{ key: string; seq: number }>('relay', 'parallel-0',
       (row) => row && { ...row, seq: row.seq + 1 })));
     expect(await db.get('relay', 'parallel-0')).toEqual({ key: 'parallel-0', seq: 8 });
+  });
+
+  it('keeps main-connection reads outside exclusive write transactions', async () => {
+    const db = openAppDb();
+    const record = { id: 'mixed-io', origin: 'mixed-io' };
+    const writing = db.putMany('items', [record]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const [, item, items, byOrigin] = await Promise.all([
+      writing, db.get('items', record.id), db.getAll('items'), db.getAllByOrigin('items', record.origin),
+    ]);
+    expect(item).toEqual(record);
+    expect(items).toContainEqual(record);
+    expect(byOrigin).toEqual([record]);
   });
 
   it('commits related item writes only when the company comparison succeeds', async () => {
