@@ -6,7 +6,7 @@ import { sha512 } from '@noble/hashes/sha2.js';
 import { describe, expect, it, vi } from 'vitest';
 import { buildPairingOffer, createCompanyFromOffer, parseJoinUrl } from './pair';
 import { handlePush, recoverPendingWakeups, topicBindings } from './relay-sw';
-import { getAllCompanies, deleteCompany, putCompany, relaySeq, pendingRecoveries } from './store';
+import { getAllCompanies, getCompany, getAllItems, commitSync, deleteCompany, putCompany, relaySeq, pendingRecoveries } from './store';
 import { bytesToBase64url } from './bytes';
 import { wakeupSignedBytes } from './relay';
 
@@ -33,10 +33,26 @@ async function setup() {
   company.authorizationExpiresAt = 0;
   await putCompany(company);
   requests.length = 0;
-  return { topic, envelope };
+  return { topic, envelope, company };
 }
 
 describe('page-side wake-up recovery', () => {
+  it('discards sync results after unfollow, preference changes or removal', async () => {
+    const { company } = await setup();
+    const changed = { ...company, prefs: { ...company.prefs, loadRemoteMedia: false },
+      channels: company.channels.map((channel) => ({ ...channel, followed: false })) };
+    await putCompany(changed);
+    expect(await commitSync(company, { ...company, lastSyncAt: Date.now() })).toBe(false);
+    expect(await getCompany(company.origin)).toEqual(changed);
+    await deleteCompany(company.origin);
+    expect(await commitSync(changed, company)).toBe(false);
+    expect(await getCompany(company.origin)).toBeUndefined();
+    expect(await getAllItems()).toEqual([]);
+    await putCompany(company);
+    expect(await commitSync(company, changed)).toBe(true);
+    expect(await getCompany(company.origin)).toEqual(changed);
+  });
+
   it('refreshes only metadata, then retries the signed envelope before advancing seq', async () => {
     const { topic, envelope } = await setup();
     expect((await handlePush(JSON.stringify(envelope))).pendingRecovery).toBe(true);

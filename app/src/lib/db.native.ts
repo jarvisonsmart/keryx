@@ -108,12 +108,16 @@ export function openAppDb(): KeyValueDb {
     deleteByOrigin(store, origin) {
       return write(async (txn) => { await txn.runAsync(`DELETE FROM ${store} WHERE origin = ?`, origin); });
     },
-    update(store, key, next) {
+    update(store, key, next, changes = []) {
       return write(async (txn) => {
         const row = await txn.getFirstAsync<Row>(`SELECT value FROM ${store} WHERE key = ?`, storageKey(key));
         const value = next(row ? decode(store, row.value) : undefined);
         if (value === undefined) return false;
         await put(txn, store, value);
+        for (const change of changes) {
+          for (const record of change.put ?? []) await put(txn, change.store, record);
+          for (const id of change.remove ?? []) await txn.runAsync(`DELETE FROM ${change.store} WHERE key = ?`, storageKey(id));
+        }
         return true;
       });
     },

@@ -22,9 +22,7 @@ import {
   clearPendingRecovery,
   reserveRecovery,
   getAllItems,
-  putCompany,
-  putItems,
-  deleteItems,
+  commitSync,
   relaySeq,
   setRelaySeq,
   markPendingRecovery,
@@ -256,7 +254,7 @@ export function recoverPendingWakeups(fetchFn: typeof fetch = fetch): Promise<Pu
         await clearPendingRecovery(pending.origin);
         if (await reserveRecovery(pending.origin, Date.now(), RECOVERY_COOLDOWN_MS)) {
           const refreshed = await syncCompany(company, fetchFn, undefined, { metadataOnly: true });
-          if (await getCompany(pending.origin)) await putCompany(refreshed.company);
+          await commitSync(company, refreshed.company);
           outcome = await handlePush(pending.payload, false);
         }
       } else {
@@ -508,7 +506,5 @@ export async function sync(company: CompanyRecord): Promise<void> {
   const all = await getAllItems();
   const existing = new Map(all.filter((i) => i.origin === company.origin).map((i) => [i.id, i]));
   const outcome = await syncCompany(company, fetch, existing);
-  await putCompany(outcome.company);
-  if (outcome.toPut.length > 0) await putItems(outcome.toPut);
-  if (outcome.toDelete.length > 0) await deleteItems(outcome.toDelete);
+  await commitSync(company, outcome.company, outcome.toPut, outcome.toDelete);
 }

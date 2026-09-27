@@ -12,8 +12,8 @@ import {
   lastPushAt,
   pendingTest,
   putCompany,
+  commitSync,
   putItems,
-  deleteItems,
   markRead,
   deleteCompany,
   type CompanyRecord,
@@ -161,10 +161,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
             itemsRef.current.filter((i) => i.origin === origin).map((i) => [i.id, i]),
           );
           const outcome = await syncCompany(company, netFetch, existing);
+          if (!(await commitSync(company, outcome.company, outcome.toPut, outcome.toDelete))) return;
           applyOutcome(origin, existing);
-          await putCompany(outcome.company);
-          if (outcome.toPut.length > 0) await putItems(outcome.toPut);
-          if (outcome.toDelete.length > 0) await deleteItems(outcome.toDelete);
           void heartbeatRelay(outcome.company.origin);
           const list = await getAllCompanies();
           setCompanies(list);

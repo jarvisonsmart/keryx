@@ -49,6 +49,18 @@ describe('SQLite persistence', () => {
     expect(await db.get('relay', 'parallel-0')).toEqual({ key: 'parallel-0', seq: 8 });
   });
 
+  it('commits related item writes only when the company comparison succeeds', async () => {
+    const db = openAppDb();
+    const company = { origin: 'race', revision: 2 };
+    const item = { id: 'race-item', origin: 'race' };
+    await db.putMany('companies', [company]);
+    const changes = [{ store: 'items' as const, put: [item] }];
+    expect(await db.update<typeof company>('companies', 'race', () => undefined, changes)).toBe(false);
+    expect(await db.get('items', item.id)).toBeUndefined();
+    expect(await db.update<typeof company>('companies', 'race', (current) => current, changes)).toBe(true);
+    expect(await db.get('items', item.id)).toEqual(item);
+  });
+
   it('round trips media bytes without interpreting publisher JSON as a byte marker', async () => {
     const db = openAppDb();
     const item = { id: 'custom', origin: 'test', item: { custom: { $bytes: 'not bytes!' } } };

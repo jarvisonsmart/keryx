@@ -115,6 +115,13 @@ export async function putCompany(company: CompanyRecord): Promise<void> {
   await db.putMany('companies', [company]);
 }
 
+/** Discard a network result if local choices or another sync changed its starting state. */
+export async function commitSync(before: CompanyRecord, after: CompanyRecord, put: StoredItem[] = [], remove: string[] = []): Promise<boolean> {
+  return db.update<CompanyRecord>('companies', before.origin,
+    (current) => JSON.stringify(current) === JSON.stringify(before) ? after : undefined,
+    [{ store: 'items', put, remove }]);
+}
+
 export async function deleteCompany(origin: string): Promise<void> {
   await db.deleteMany('companies', [origin]);
   await db.deleteByOrigin('items', origin);

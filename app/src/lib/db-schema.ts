@@ -2,6 +2,12 @@
 export type StoreName = 'companies' | 'items' | 'media' | 'relay' | 'registrations';
 export type OriginStore = 'items' | 'media';
 
+export interface StoreChanges {
+  store: StoreName;
+  put?: object[];
+  remove?: string[];
+}
+
 export interface KeyValueDb {
   get<T>(store: StoreName, key: string): Promise<T | undefined>;
   getAll<T>(store: StoreName): Promise<T[]>;
@@ -10,7 +16,7 @@ export interface KeyValueDb {
   deleteMany(store: StoreName, keys: string[]): Promise<void>;
   deleteByOrigin(store: OriginStore, origin: string): Promise<void>;
   /** Atomic read-modify-write of one record; `next` returning undefined writes nothing. Resolves whether it wrote. */
-  update<T extends object>(store: StoreName, key: string, next: (current: T | undefined) => T | undefined): Promise<boolean>;
+  update<T extends object>(store: StoreName, key: string, next: (current: T | undefined) => T | undefined, changes?: StoreChanges[]): Promise<boolean>;
 }
 
 /** Each store's primary key field. */

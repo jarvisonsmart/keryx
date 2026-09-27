@@ -58,10 +58,17 @@ export function openAppDb(): KeyValueDb {
       }
       await tx.done;
     },
-    async update(store, key, next) {
-      const tx = (await idb()).transaction(store, 'readwrite');
-      const value = next(await tx.store.get(key));
-      if (value !== undefined) await tx.store.put(value);
+    async update(store, key, next, changes = []) {
+      const tx = (await idb()).transaction([...new Set([store, ...changes.map((c) => c.store)])], 'readwrite');
+      const value = next(await tx.objectStore(store).get(key));
+      if (value !== undefined) {
+        await tx.objectStore(store).put(value);
+        for (const change of changes) {
+          const target = tx.objectStore(change.store);
+          for (const record of change.put ?? []) await target.put(record);
+          for (const id of change.remove ?? []) await target.delete(id);
+        }
+      }
       await tx.done;
       return value !== undefined;
     },
