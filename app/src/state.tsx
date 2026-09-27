@@ -181,6 +181,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [refreshNotificationState],
   );
 
+  useEffect(() => {
+    if (!loaded) return;
+    let checking = false;
+    const refresh = async () => {
+      if (checking || AppState.currentState !== 'active') return;
+      checking = true;
+      try {
+        for (const company of await getAllCompanies()) {
+          if (Date.now() - (company.lastSyncAt ?? 0) >= 5 * 60_000) await syncCompanyNow(company.origin);
+        }
+      } finally { checking = false; }
+    };
+    void refresh();
+    const timer = setInterval(() => { void refresh(); }, 60_000);
+    const subscription = AppState.addEventListener('change', () => { void refresh(); });
+    return () => { clearInterval(timer); subscription.remove(); };
+  }, [loaded, syncCompanyNow]);
+
   /**
    * The network work the worker deliberately does not do (design/notifications.md,
    * "Worker-side processing"): re-verify a wake-up the worker could not verify
