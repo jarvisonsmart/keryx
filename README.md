@@ -21,9 +21,7 @@ The stack is deliberately boring: HTTPS + QR + TUF + Ed25519.
 ## Demo
 
 Try it live: the [Keryx PWA](https://v1b3coder.github.io/keryx/) (installable
-web app), the [Android app](https://github.com/v1b3coder/keryx/releases)
-(APK in GitHub Releases; [Obtainium](https://github.com/ImranR98/Obtainium)
-adds automatic updates) and the demo publisher site
+web app), the [Android app](#android-app) and the demo publisher site
 [`keryx-demo.github.io`](https://keryx-demo.github.io/) — its homepage
 offers both join links: the plain one (public channels only) and the one
 with the private tracking feed.
@@ -47,6 +45,35 @@ copy, override the paths and the signed origin:
 ```
 make demo DEMO_REPO=/tmp/keryx-demo DEMO_KEYS_DIR=/tmp/keryx-demo-keys DEMO_BASE=http://localhost:8000
 ```
+
+---
+
+## Android app
+
+The app is published as a signed APK in
+[GitHub Releases](https://github.com/v1b3coder/keryx/releases). To install it and
+keep it updated, use [Obtainium](https://github.com/ImranR98/Obtainium): add the
+repository as an app source,
+
+```
+https://github.com/v1b3coder/keryx
+```
+
+and Obtainium installs the newest release and updates it in place. Every release
+is signed with the project's release key, so a new version always installs as an
+update over the running one — the certificate never changes:
+
+```
+SHA-256  5E:5A:CD:AF:31:88:49:F9:6D:C4:F5:08:A0:DA:A5:A4:74:BC:60:B2:3A:2C:63:9D:33:75:85:FF:F5:E7:C8:A1
+```
+
+The APK from the release page installs by hand as well, but then every update is
+a manual download and confirmation; the fingerprint is what
+[AppVerifier](https://github.com/soupslurpr/AppVerifier) checks before the first
+install. Wake-ups arrive over Google's FCM on devices with Google services and over
+[ntfy](https://ntfy.sh) (UnifiedPush) on de-Googled devices — a de-Googled
+phone asks for ntfy on the first pairing. Building the app from source: see
+[`app/README.md`](app/README.md).
 
 ---
 
