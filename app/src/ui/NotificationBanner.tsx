@@ -84,7 +84,7 @@ export function NotificationBanner({
             state.leg === 'registration'
               ? 'Notifications could not be registered. Try again.'
               : state.leg === 'topic'
-                ? 'The test wake-up was not sent. Try again.'
+                ? 'The test notification was not sent. Try again.'
                 : 'The test notification did not arrive. Try again.'
           }
           actions={<Button compact label="Try again" onPress={onRetry} />}

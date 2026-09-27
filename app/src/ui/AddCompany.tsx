@@ -476,7 +476,7 @@ function NotificationsScreen({
             {notification.leg === 'registration'
               ? 'Notifications could not be registered. Try again.'
               : notification.leg === 'topic'
-                ? 'The test wake-up was not sent. Try again.'
+                ? 'The test notification was not sent. Try again.'
                 : 'The test notification did not arrive. Try again.'}
           </Alert>
         </View>
