@@ -305,6 +305,7 @@ export async function syncCompany(
 
   const updated: CompanyRecord = {
     ...company,
+    privateFeeds: company.privateFeeds.map((sub) => ({ ...sub })),
     rebrandPending,
     logoChangePending,
     pinnedRoot: root,
@@ -496,7 +497,6 @@ export async function syncCompany(
     }
   }
 
-  updated.privateFeeds = updated.privateFeeds.map((sub) => ({ ...sub }));
   updated.lastSyncErrors = errors.slice(0, 8);
   updated.lastSyncAt = Date.now();
   return { company: updated, newItems, rejected, suspended, errors, toPut, toDelete };

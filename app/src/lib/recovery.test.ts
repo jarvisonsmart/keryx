@@ -9,6 +9,7 @@ import { handlePush, recoverPendingWakeups, topicBindings } from './relay-sw';
 import { getAllCompanies, getCompany, getAllItems, commitSync, deleteCompany, putCompany, relaySeq, pendingRecoveries } from './store';
 import { bytesToBase64url } from './bytes';
 import { wakeupSignedBytes } from './relay';
+import { syncCompany } from './sync';
 
 hashes.sha512 = sha512;
 const demo = process.env.KERYX_DEMO_DIR ?? '../keryx-demo';
@@ -51,6 +52,20 @@ describe('page-side wake-up recovery', () => {
     await putCompany(company);
     expect(await commitSync(company, changed)).toBe(true);
     expect(await getCompany(company.origin)).toEqual(changed);
+  });
+
+  it('commits private feed closure without mutating the starting company', async () => {
+    const { company } = await setup();
+    expect(company.privateFeeds.length).toBeGreaterThan(0);
+    const before = structuredClone(company);
+    const closed: typeof fetch = async (input, init) =>
+      company.privateFeeds.some((sub) => sub.url === String(input))
+        ? new Response('', { status: 404 }) : fetchDemo(input, init);
+    const result = await syncCompany(company, closed, new Map());
+    expect(result.company.privateFeeds.every((sub) => sub.closed)).toBe(true);
+    expect(company).toEqual(before);
+    expect(await commitSync(company, result.company, result.toPut, result.toDelete)).toBe(true);
+    expect((await getCompany(origin))?.privateFeeds).toEqual(result.company.privateFeeds);
   });
 
   it('refreshes only metadata, then retries the signed envelope before advancing seq', async () => {
