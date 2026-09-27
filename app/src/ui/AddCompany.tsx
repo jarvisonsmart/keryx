@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { View } from 'react-native';
+import { Keyboard, View } from 'react-native';
 import { TextInput } from './text';
 import { ArrowLeft, ArrowRight, ClipboardText, QrCode } from './icons';
 import { parseJoinUrl, type JoinPayload } from '../lib/payload';
@@ -59,6 +59,7 @@ export function AddCompany({
   }, []);
 
   function startPairing(input: string) {
+    Keyboard.dismiss();
     try {
       const parsed = parseJoinUrl(input);
       setStep({ t: 'confirm', origin: parsed.origin, joinUrl: parsed.joinUrl, payload: parsed.payload });
