@@ -4,7 +4,7 @@
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
+import { AppState } from 'react-native';
 import {
   getAllCompanies,
   getAllItems,
@@ -44,7 +44,7 @@ import {
 import { nativePushSource, ensurePushWakeups, pushSupport } from './lib/push';
 import { KeryxPush } from './lib/native-push';
 import { pushVerifyState } from './lib/verify-state';
-import { initDebugBuild } from './lib/build';
+import { appPlatform } from './lib/platform';
 import { safeFetch } from './lib/urlpolicy';
 
 export interface AppActions {
@@ -238,7 +238,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [processNativePayload]);
 
   useEffect(() => {
-    initDebugBuild();
     void (async () => {
       const list = await getAllCompanies();
       // seed the in-memory item map from the persistent store: syncCompany
@@ -255,16 +254,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // the banner re-checks when the app returns to the foreground, so an
     // in-flight test that landed in the background upgrades to green, and the
     // page drains any wake-up the worker recorded
-    const onVisible = () => {
-      if (document.visibilityState !== 'visible') return;
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
       void refreshNotificationState();
       void runRelayCheck();
       void drainPendingRecoveries();
-      void drainNativeMessages();
+      if (appPlatform() !== 'web') void drainNativeMessages();
       void catchUpOnWakeups();
-    };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
+    });
+    return () => subscription.remove();
   }, [
     refreshNotificationState,
     runRelayCheck,
@@ -273,16 +271,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     catchUpOnWakeups,
   ]);
 
-  // Android wake-ups arrive through the UnifiedPush connector: install the
-  // native subscription source, register on every start, drain the native queue
-  // and re-verify each payload with the full TUF state (the worker only gates)
+  // App wake-ups arrive through the native module (FCM on Android and iOS, the
+  // UnifiedPush connector on de-Googled Android): install the native
+  // subscription source, register on every start, drain the native queue and
+  // re-verify each payload with the full TUF state (the native side only gates)
   useEffect(() => {
-    if (Capacitor.getPlatform() !== 'android') return;
-    let listener: PluginListenerHandle | undefined;
+    if (appPlatform() === 'web') return;
+    const stopListening = KeryxPush.onPush((payload) => void processNativePayload(payload));
     void (async () => {
-      setSubscriptionSource(nativePushSource);
+      if (appPlatform() === 'android') setSubscriptionSource(nativePushSource);
       const support = await pushSupport();
-      if (!support.fcm) {
+      if (appPlatform() === 'android' && !support.fcm) {
         // the UnifiedPush connector is the endpoint leg's source; FCM needs none
         const vapid = vapidPublicKey();
         if (vapid) {
@@ -293,9 +292,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }
         }
       }
-      listener = await KeryxPush.addListener('push', ({ payload }) => {
-        void processNativePayload(payload);
-      });
       await drainNativeMessages();
       // the mirror must match the store before the transport work below, which
       // can hang or fail
@@ -304,7 +300,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await catchUpOnWakeups();
     })();
     return () => {
-      void listener?.remove();
+      stopListening();
       setSubscriptionSource(null);
     };
   }, [processNativePayload, drainNativeMessages, catchUpOnWakeups]);
@@ -370,9 +366,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         await ensurePushWakeups(await getAllCompanies());
       },
       async enableNotifications() {
-        if (Capacitor.getPlatform() === 'android') {
-          // the native permission is the source of truth (POST_NOTIFICATIONS);
-          // the WebView's Notification API is not usable
+        if (appPlatform() !== 'web') {
+          // the native permission is the source of truth
           if (!(await requestNativeNotificationPermission())) {
             setNotification(await notificationState());
             return { endpoint: 'failed', leg: 'registration' };

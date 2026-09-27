@@ -34,8 +34,11 @@ site is public.
 ## The stack
 
 - `relay/` → relay, Fly.io `keryx-relay`; single machine, idle-exit + cold start.
-- `app/` → PWA, GitHub Pages on a push to `main`; the deployed relay's
-  `vapid_public` must match the PWA's default (`app/src/lib/relay.ts`).
+- `app/` → Expo app: PWA (Expo web, GitHub Pages on a push to `main`),
+  Android and iOS. Native projects are generated (`npx expo prebuild`), never
+  committed; native code lives in `app/modules/keryx-push` and config plugins.
+  The deployed relay's `vapid_public` must match the PWA's default
+  (`app/src/lib/relay.ts`).
 - `../keryx-demo` → demo site, own repo; regenerate with `make demo`.
 - `../keryx-demo-keys` → maintainer-only release keystore, never commit it.
 - `../keryx-android-keys` → maintainer-only Android signing keystore, never
@@ -69,8 +72,8 @@ guessed delay; a device woken early silently shows one publish behind. It refuse
 
 ```sh
 cd relay && go run ./cmd/relay-harness   # prints join_url/vapid_public
-cd app && VITE_BASE=/ VITE_RELAY_URL=http://127.0.0.1:18099 \
-  VITE_VAPID_PUBLIC=<vapid_public> npm run build && npx vite preview --port 4173 --strictPort
+cd app && EXPO_PUBLIC_RELAY_URL=http://127.0.0.1:18099 \
+  EXPO_PUBLIC_VAPID_PUBLIC=<vapid_public> npm run build && npm run preview   # :4173
 cd relay && fly deploy -a keryx-relay --remote-only
 curl -X POST https://keryx-relay.fly.dev/v1/registrations/missing/test   # 401 = new code
 fly logs -a keryx-relay --no-tail | grep vapid_public   # must match the PWA

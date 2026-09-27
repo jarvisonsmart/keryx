@@ -7,7 +7,6 @@
  * followed company's topics. Nothing durable is per company.
  */
 
-import { Capacitor } from '@capacitor/core';
 import {
   clearPendingTest,
   getAllCompanies,
@@ -20,6 +19,7 @@ import {
 import { relayBaseUrl, testRegistration, vapidPublicKey, RelayGone } from './relay';
 import { currentPushTransport } from './push';
 import { KeryxPush } from './native-push';
+import { appPlatform } from './platform';
 import { ensureRelayRegistration, topicBindings, unionTopics } from './relay-sw';
 import { fcmTopicsSynced, runFcmSelfTest } from './fcm';
 import type { RelayRegistration } from './relay';
@@ -54,7 +54,7 @@ export function permissionState(): NotificationPermission | 'unsupported' {
   return Notification.permission;
 }
 
-/** The native notification permission (Android; POST_NOTIFICATIONS). */
+/** The native notification permission (Android POST_NOTIFICATIONS, iOS authorization). */
 export async function nativeNotificationGranted(): Promise<boolean> {
   try {
     return (await KeryxPush.getNotificationPermission()).granted;
@@ -63,7 +63,7 @@ export async function nativeNotificationGranted(): Promise<boolean> {
   }
 }
 
-/** Ask for the native notification permission (Android; POST_NOTIFICATIONS). */
+/** Ask for the native notification permission (Android POST_NOTIFICATIONS, iOS authorization). */
 export async function requestNativeNotificationPermission(): Promise<boolean> {
   try {
     return (await KeryxPush.requestNotificationPermission()).granted;
@@ -78,9 +78,7 @@ export async function notificationState(): Promise<NotificationState> {
   if (transport === 'none') {
     // an Android install can fix this by installing ntfy; a browser without
     // PushManager cannot (polling is its backstop)
-    return Capacitor.getPlatform() === 'android'
-      ? { kind: 'no-transport' }
-      : { kind: 'unsupported' };
+    return appPlatform() === 'android' ? { kind: 'no-transport' } : { kind: 'unsupported' };
   }
   if (transport === 'fcm') {
     // The topic leg has no relay registration: the native permission is the
@@ -98,8 +96,7 @@ export async function notificationState(): Promise<NotificationState> {
     return { kind: 'ok' };
   }
   if (transport === 'unifiedpush') {
-    // Android: the native permission is the source of truth (POST_NOTIFICATIONS);
-    // the WebView's Notification API is not usable
+    // the native permission is the source of truth (POST_NOTIFICATIONS)
     if (!(await nativeNotificationGranted())) return { kind: 'default' };
   } else {
     const permission = permissionState();

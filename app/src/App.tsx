@@ -5,15 +5,19 @@
  */
 
 import { useEffect, useState } from 'react';
+import { View } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppProvider, useApp } from './state';
 import { AddCompany } from './ui/AddCompany';
 import { Contacts } from './ui/Contacts';
 import { CompanyView } from './ui/Company';
 import { BuildStamp } from './ui/BuildStamp';
 import { getAllItems, getCompany, getItems, type CompanyRecord, type StoredItem } from './lib/store';
-import { joinUrlFromDeepLink } from './lib/payload';
+import { takeDeepLink } from './lib/deeplink';
+import { Button, Loading, Screen, Txt } from './ui/kit';
 
-type View =
+type Route =
   | { t: 'start' }
   | { t: 'contacts' }
   | { t: 'company'; origin: string }
@@ -21,7 +25,7 @@ type View =
 
 export default function App() {
   const { companies, loaded, notification, freshTest, actions } = useApp();
-  const [view, setView] = useState<View>({ t: 'start' });
+  const [view, setView] = useState<Route>({ t: 'start' });
   const [contactsItems, setContactsItems] = useState<StoredItem[]>([]);
 
   // Contacts shows unread counts; refresh them whenever the list is shown
@@ -58,28 +62,14 @@ export default function App() {
     }
   }, [loaded, companies]);
 
-  // Out-of-spec PWA deep link (?domain=&p=): start pairing immediately,
-  // then drop the params so a reload does not re-trigger pairing. Must stay
-  // above the early return below (hooks order must be stable).
+  // Out-of-spec PWA deep link (?domain=&p=): start pairing immediately. Must
+  // stay above the early return below (hooks order must be stable).
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const domain = params.get('domain');
-    if (!domain) return;
-    const url = joinUrlFromDeepLink(domain, params.get('p'));
-    if (!url) return;
-    setView({ t: 'add', from: 'start', deepLink: url });
-    history.replaceState(null, '', window.location.pathname + window.location.hash);
+    const url = takeDeepLink();
+    if (url) setView({ t: 'add', from: 'start', deepLink: url });
   }, []);
 
-  if (!loaded) {
-    return (
-      <div className="screen">
-        <div className="empty">
-          <div className="spinner" />
-        </div>
-      </div>
-    );
-  }
+  if (!loaded) return <Loading />;
 
   if (view.t === 'add') {
     return (
@@ -123,21 +113,18 @@ export default function App() {
 
   // start: zero companies
   return (
-    <div className="screen screen-pad" style={{ paddingTop: 48 }}>
-      <div className="empty" style={{ alignItems: 'stretch', textAlign: 'left', paddingTop: 0 }}>
-        <h1 className="t-title" style={{ margin: '0 0 8px' }}>
+    <Screen>
+      <View style={{ flexGrow: 1, justifyContent: 'center', paddingBottom: 48 }}>
+        <Txt variant="title" style={{ marginBottom: 8 }}>
           Company messages
-        </h1>
-        <p className="t-body t-muted" style={{ margin: '0 0 24px' }}>
-          Companies you follow publish here. Messages are verified, so nothing can be
-          faked.
-        </p>
-        <button className="btn btn-primary" onClick={() => setView({ t: 'add', from: 'start' })}>
-          Add a company
-        </button>
+        </Txt>
+        <Txt muted style={{ marginBottom: 24 }}>
+          Companies you follow publish here. Messages are verified, so nothing can be faked.
+        </Txt>
+        <Button label="Add a company" onPress={() => setView({ t: 'add', from: 'start' })} />
         <BuildStamp />
-      </div>
-    </div>
+      </View>
+    </Screen>
   );
 }
 
@@ -169,15 +156,7 @@ function CompanyRoute({
     };
   }, [origin, companies]);
 
-  if (!company) {
-    return (
-      <div className="screen">
-        <div className="empty">
-          <div className="spinner" />
-        </div>
-      </div>
-    );
-  }
+  if (!company) return <Loading />;
 
   return (
     <CompanyView company={company} items={companyItems} onBack={onBackToContacts} onRepair={onRepair} onAdd={onAddCompany} />
@@ -186,8 +165,11 @@ function CompanyRoute({
 
 export function Root() {
   return (
-    <AppProvider>
-      <App />
-    </AppProvider>
+    <SafeAreaProvider>
+      <StatusBar style="auto" />
+      <AppProvider>
+        <App />
+      </AppProvider>
+    </SafeAreaProvider>
   );
 }

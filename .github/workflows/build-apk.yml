@@ -33,7 +33,7 @@ jobs:
         uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: '21'  # Capacitor 8's capacitor-android requires Java 21
+          java-version: '17'  # React Native's Android toolchain
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
@@ -47,7 +47,7 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('app/android/**/*.gradle', 'app/android/gradle/wrapper/gradle-wrapper.properties', 'app/android/gradle.properties') }}
+          key: gradle-${{ runner.os }}-${{ hashFiles('app/package-lock.json', 'app/modules/keryx-push/android/build.gradle') }}
 
       # The release keystore signs every published APK. It lives only in
       # GitHub secrets (see ../keryx-android-keys); the CI must never publish
@@ -66,15 +66,6 @@ jobs:
         working-directory: app
         run: npm ci
 
-      - name: Build web assets and sync to Android
-        working-directory: app
-        env:
-          # shown in the app footer (lib/build.ts) so a stale install is visible
-          VITE_GIT_COMMIT: ${{ github.sha }}
-        run: |
-          npm run build
-          npx cap sync android
-
       - name: Resolve version
         id: version
         shell: bash
@@ -91,6 +82,16 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      # The native project is generated (Continuous Native Generation): the
+      # version and the release signing come from app.config.ts and
+      # plugins/with-keryx-android.js.
+      - name: Generate the Android project
+        working-directory: app
+        env:
+          KERYX_VERSION_NAME: ${{ steps.version.outputs.apk_version }}
+          KERYX_VERSION_CODE: ${{ steps.version.outputs.code }}
+        run: npx expo prebuild --platform android --clean --no-install
+
       - name: Build release APK
         working-directory: app/android
         env:
@@ -98,9 +99,9 @@ jobs:
           KERYX_KEYSTORE_PASSWORD: ${{ secrets.KERYX_KEYSTORE_PASSWORD }}
           KERYX_KEY_ALIAS: ${{ secrets.KERYX_KEY_ALIAS }}
           KERYX_KEY_PASSWORD: ${{ secrets.KERYX_KEY_PASSWORD }}
-          KERYX_VERSION_NAME: ${{ steps.version.outputs.apk_version }}
-          KERYX_VERSION_CODE: ${{ steps.version.outputs.code }}
-        run: ./gradlew testReleaseUnitTest assembleRelease
+          # shown in the app footer (lib/build.ts) so a stale install is visible
+          EXPO_PUBLIC_GIT_COMMIT: ${{ github.sha }}
+        run: ./gradlew :keryx-push:testReleaseUnitTest assembleRelease
 
       - name: Stage APK
         run: |

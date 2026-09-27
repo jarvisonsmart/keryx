@@ -39,9 +39,9 @@ jobs:
       - name: Build web app (PWA)
         working-directory: app
         env:
-          VITE_BASE: /keryx/
+          EXPO_BASE_URL: /keryx/
           # shown in the app footer (lib/build.ts) so a stale install is visible
-          VITE_GIT_COMMIT: ${{ github.sha }}
+          EXPO_PUBLIC_GIT_COMMIT: ${{ github.sha }}
         run: npm run build
 
       - name: Upload Pages artifact

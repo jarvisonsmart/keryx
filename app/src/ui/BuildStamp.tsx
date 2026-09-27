@@ -3,11 +3,12 @@
  * footer stamp so a running install can be told apart from a stale one.
  */
 import { appVersion } from '../lib/build';
+import { Txt } from './kit';
 
 export function BuildStamp() {
   return (
-    <div className="t-small t-muted" style={{ textAlign: 'center', padding: '12px 0 4px' }}>
+    <Txt variant="small" style={{ textAlign: 'center', paddingTop: 12, paddingBottom: 4 }}>
       Build {appVersion()}
-    </div>
+    </Txt>
   );
 }

@@ -5,28 +5,22 @@
  * rebranding states per spec/core.md §2, §4.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, GearSix, ArrowClockwise, Trash, ShieldWarning, LockSimple, Plus } from '@phosphor-icons/react';
-import { Capacitor } from '@capacitor/core';
-import { Browser } from '@capacitor/browser';
-import type { CompanyRecord, StoredItem, ChannelState } from '../lib/store';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert as NativeAlert, FlatList, Pressable, View, type ViewToken } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ArrowClockwise, ArrowLeft, GearSix, LockSimple, Plus, ShieldWarning, Trash } from './icons';
+import type { ChannelState, CompanyRecord, StoredItem } from '../lib/store';
 import { formatDate, formatDateTime, matchesFilter } from '../lib/format';
 import { loadImage } from '../lib/media';
+import { attachmentSha, bytesMatchSha, type FeedItem } from '../lib/item';
+import { appPlatform, openExternal } from '../lib/platform';
 import { CompanyLogo } from './CompanyLogo';
-import { SanitizedHtml, LinkConfirm } from './SanitizedHtml';
+import { LinkConfirm, RichText } from './RichText';
 import { NotificationBanner } from './NotificationBanner';
 import { BuildStamp } from './BuildStamp';
+import { Alert, AppBar, Button, Chip, Divider, IconButton, Row, Screen, Sheet, Stack, Toggle, Txt, VerifiedImage } from './kit';
+import { MAX_WIDTH, mono, radius, useColors } from './theme';
 import { useApp } from '../state';
-import { attachmentSha, bytesMatchSha } from '../lib/item';
-import type { FeedItem } from '../lib/item';
-
-async function openExternal(url: string) {
-  if (Capacitor.isNativePlatform()) {
-    await Browser.open({ url });
-  } else {
-    window.open(url, '_blank', 'noopener,noreferrer');
-  }
-}
 
 /**
  * Open an attachment after verifying its `sha256` when present
@@ -50,6 +44,23 @@ async function openAttachment(url: string, item: FeedItem) {
   await openExternal(url);
 }
 
+/** Ask before a destructive action (the web has no native alert). */
+function confirmRemove(origin: string, onConfirm: () => void) {
+  const message = `Remove ${origin}? All saved messages are deleted from this device.`;
+  if (appPlatform() === 'web') {
+    if (window.confirm(message)) onConfirm();
+    return;
+  }
+  NativeAlert.alert('Remove company', message, [
+    { text: 'Cancel', style: 'cancel' },
+    { text: 'Remove', style: 'destructive', onPress: onConfirm },
+  ]);
+}
+
+function feedKeyOf(stored: StoredItem): string {
+  return stored.isPrivate ? `private:${stored.feedUrl}` : `public:${stored.channel}`;
+}
+
 export function CompanyView({
   company,
   items,
@@ -66,121 +77,93 @@ export function CompanyView({
   onAdd: () => void;
 }) {
   const { actions, companies, syncing, notification, freshTest } = useApp();
+  const c = useColors();
+  const insets = useSafeAreaInsets();
   const [showSettings, setShowSettings] = useState(false);
   const [pendingLink, setPendingLink] = useState<{ url: string; item: FeedItem } | null>(null);
 
-  const followed = new Set(company.channels.filter((c) => c.followed).map((c) => c.name));
-  const visible = useMemo(() => {
-    const list = items
-      .filter((i) => {
-        if (i.isPrivate) return true;
-        if (!followed.has(i.channel)) return false;
-        return matchesFilter(i.item, company.prefs);
-      })
-      .sort((a, b) => {
-        const ta = Date.parse(a.published);
-        const tb = Date.parse(b.published);
-        if (!Number.isNaN(ta) && !Number.isNaN(tb)) return tb - ta;
-        if (!Number.isNaN(ta)) return -1;
-        if (!Number.isNaN(tb)) return 1;
-        return (b.feedIndex ?? 0) - (a.feedIndex ?? 0);
-      });
-    return list;
-  }, [items, followed, company.prefs]);
+  const followed = useMemo(
+    () => new Set(company.channels.filter((ch) => ch.followed).map((ch) => ch.name)),
+    [company.channels],
+  );
+  const visible = useMemo(
+    () =>
+      items
+        .filter((i) => i.isPrivate || (followed.has(i.channel) && matchesFilter(i.item, company.prefs)))
+        .sort((a, b) => {
+          const ta = Date.parse(a.published);
+          const tb = Date.parse(b.published);
+          if (!Number.isNaN(ta) && !Number.isNaN(tb)) return tb - ta;
+          if (!Number.isNaN(ta)) return -1;
+          if (!Number.isNaN(tb)) return 1;
+          return (b.feedIndex ?? 0) - (a.feedIndex ?? 0);
+        }),
+    [items, followed, company.prefs],
+  );
 
-  const anyFollowed = followed.size > 0;
+  // mark an article read once 60% of it has been on screen (no detail view)
+  const markRead = useRef(actions.markRead);
+  markRead.current = actions.markRead;
+  const onViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: ViewToken<StoredItem>[] }) => {
+      for (const { item: stored, isViewable } of viewableItems) {
+        if (!isViewable || stored.read) continue;
+        void markRead.current(stored.origin, feedKeyOf(stored), stored.item.id!, true);
+      }
+    },
+    [],
+  );
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 60 }).current;
+
+  const remove = () => confirmRemove(company.origin, () => void actions.removeCompany(company.origin));
 
   // --- suspension (spec/core.md §4): warning + Remove only, no re-pair ----
   if (company.status === 'suspended') {
     return (
-      <div className="screen screen-pad" style={{ paddingTop: 48 }}>
-        <div className="alert alert-danger">
-          <h3 style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <ShieldWarning size={22} /> Messages are not shown
-          </h3>
-          <p>
-            This company's identity changed. This can mean the company's website or
-            signing keys were compromised.
-          </p>
-          <p className="t-mono" style={{ fontSize: '0.75rem', marginTop: 8 }}>
-            {company.origin}
-          </p>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
-          <button className="btn btn-danger" onClick={() => void actions.removeCompany(company.origin)}>
-            <Trash size={20} /> Remove company
-          </button>
-          <button className="btn btn-ghost" onClick={onBack}>
-            Back
-          </button>
-        </div>
-      </div>
+      <Screen>
+        <Alert danger>
+          <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', marginBottom: 4 }}>
+            <ShieldWarning size={22} color={c.text} />
+            <Txt bold style={{ fontSize: 17 }}>Messages are not shown</Txt>
+          </View>
+          <Txt variant="small" style={{ fontSize: 14 }}>
+            This company's identity changed. This can mean the company's website or signing keys were compromised.
+          </Txt>
+          <Txt variant="mono" muted style={{ fontSize: 12, marginTop: 8 }}>{company.origin}</Txt>
+        </Alert>
+        <Stack style={{ marginTop: 16 }}>
+          <Button kind="danger" label="Remove company" icon={<Trash size={20} color={c.danger} />} onPress={() => void actions.removeCompany(company.origin)} />
+          <Button kind="ghost" label="Back" onPress={onBack} />
+        </Stack>
+      </Screen>
     );
   }
 
   // --- rebranding (spec/core.md §2): company_name changed → re-pair required
   if (company.status === 'rebrand' || company.rebrandPending) {
     return (
-      <div className="screen screen-pad" style={{ paddingTop: 48 }}>
-        <div className="alert alert-danger">
-          <h3>This company changed its name</h3>
-          <p>
-            A company's name can only change after you confirm it again. Scan a fresh QR
-            code from the company to continue receiving its messages.
-          </p>
-          <p className="t-mono" style={{ fontSize: '0.75rem', marginTop: 8 }}>
-            {company.origin}
-          </p>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
-          <button className="btn btn-primary" onClick={() => onRepair(company.origin)}>
-            Scan a new QR code
-          </button>
-          <button className="btn btn-danger" onClick={() => void actions.removeCompany(company.origin)}>
-            <Trash size={20} /> Remove company
-          </button>
-        </div>
-      </div>
+      <Screen>
+        <Alert danger title="This company changed its name">
+          <Txt variant="small" style={{ fontSize: 14 }}>
+            A company's name can only change after you confirm it again. Scan a fresh QR code from the company to
+            continue receiving its messages.
+          </Txt>
+          <Txt variant="mono" muted style={{ fontSize: 12, marginTop: 8 }}>{company.origin}</Txt>
+        </Alert>
+        <Stack style={{ marginTop: 16 }}>
+          <Button label="Scan a new QR code" onPress={() => onRepair(company.origin)} />
+          <Button kind="danger" label="Remove company" icon={<Trash size={20} color={c.danger} />} onPress={() => void actions.removeCompany(company.origin)} />
+        </Stack>
+      </Screen>
     );
   }
 
-  return (
-    <div className="screen">
-      <div className="appbar">
-        <div className="appbar-inner">
-          {companies.length > 1 && (
-            <button className="iconbtn" onClick={onBack} aria-label="Back">
-              <ArrowLeft size={24} />
-            </button>
-          )}
-          <div className="companybar">
-            <CompanyLogo
-              url={company.targets.signed.custom?.logo}
-              origin={company.origin}
-              expectedSha={company.targets.signed.custom?.logo_sha256}
-            />
-            <div style={{ minWidth: 0 }}>
-              <div className="companybar-name">
-                {company.targets.signed.custom?.company_name ?? company.origin}
-              </div>
-              <div className="companybar-origin">{company.origin}</div>
-            </div>
-          </div>
-          <button className="iconbtn" onClick={() => void actions.syncCompanyNow(company.origin)} aria-label="Refresh">
-            <ArrowClockwise size={22} className={syncing ? 'spin' : ''} />
-          </button>
-          <button className="iconbtn" onClick={() => setShowSettings(true)} aria-label="Settings">
-            <GearSix size={24} />
-          </button>
-          {companies.length === 1 && (
-            <button className="iconbtn" onClick={onAdd} aria-label="Add company">
-              <Plus size={24} weight="bold" />
-            </button>
-          )}
-        </div>
-      </div>
+  const custom = company.targets.signed.custom;
+  const anyFollowed = followed.size > 0;
 
-      <div className="screen-pad" style={{ paddingTop: 8 }}>
+  const header = (
+    <View style={{ paddingHorizontal: 20 }}>
+      <View style={{ paddingTop: 8 }}>
         <NotificationBanner
           state={notification}
           freshTest={freshTest}
@@ -188,75 +171,97 @@ export function CompanyView({
           onCheck={() => void actions.checkNotifications()}
           onRetry={() => void actions.runNotificationSelfTest()}
         />
-      </div>
+      </View>
+      {company.logoChangePending ? (
+        <View style={{ paddingTop: 12 }}>
+          <Alert>
+            <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
+              <Txt style={{ flex: 1, fontSize: 14 }}>The company updated its logo.</Txt>
+              <Button compact kind="secondary" label="Got it" onPress={() => void actions.acknowledgeLogo(company.origin)} />
+            </View>
+          </Alert>
+        </View>
+      ) : null}
+      {company.lastSyncErrors && company.lastSyncErrors.length > 0 ? (
+        <Txt variant="small" style={{ paddingTop: 12 }}>{company.lastSyncErrors[0]}</Txt>
+      ) : null}
+    </View>
+  );
 
-      {company.logoChangePending && (
-        <div className="screen-pad" style={{ paddingTop: 12 }}>
-          <div className="alert" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-            <div style={{ flex: 1 }}>
-              <p style={{ color: 'var(--text)', margin: 0 }}>The company updated its logo.</p>
-            </div>
-            <button
-              className="btn btn-secondary"
-              style={{ minHeight: 40, padding: '0 16px', fontSize: '0.875rem' }}
-              onClick={() => void actions.acknowledgeLogo(company.origin)}
-            >
-              Got it
-            </button>
-          </div>
-        </div>
-      )}
+  const empty = (
+    <View style={{ alignItems: 'center', padding: 40, gap: 8 }}>
+      <Txt variant="section">{anyFollowed ? 'No messages yet' : 'No channels yet'}</Txt>
+      <Txt variant="small" style={{ textAlign: 'center', maxWidth: 280 }}>
+        {anyFollowed
+          ? 'Messages appear here as soon as the company publishes.'
+          : 'Open settings to follow a channel from this company.'}
+      </Txt>
+    </View>
+  );
 
-      {company.lastSyncErrors && company.lastSyncErrors.length > 0 && (
-        <div className="screen-pad" style={{ paddingTop: 12 }}>
-          <p className="t-small t-muted" style={{ margin: 0 }}>
-            {company.lastSyncErrors[0]}
-          </p>
-        </div>
-      )}
+  const footer =
+    visible.length > 0 ? (
+      <View style={{ marginHorizontal: 20, marginTop: 24, marginBottom: 32, paddingTop: 16, borderTopWidth: 1, borderTopColor: c.border, flexDirection: 'row', gap: 8 }}>
+        <View style={{ marginTop: 2 }}>
+          <LockSimple size={16} color={c.text2} />
+        </View>
+        <Txt variant="small" style={{ flex: 1 }}>This channel will never ask you for a password, seed, or code.</Txt>
+      </View>
+    ) : null;
 
-      <div className="feedlist" style={{ flex: 1 }}>
-        {!anyFollowed && visible.length === 0 && (
-          <div className="empty">
-            <div className="t-section">No channels yet</div>
-            <p className="t-small t-muted" style={{ maxWidth: 280 }}>
-              Open settings to follow a channel from this company.
-            </p>
-          </div>
+  return (
+    <View style={{ flex: 1, backgroundColor: c.bg }}>
+      <AppBar>
+        {companies.length > 1 ? (
+          <IconButton label="Back" onPress={onBack}>
+            <ArrowLeft size={24} color={c.text} />
+          </IconButton>
+        ) : null}
+        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, minWidth: 0 }}>
+          <CompanyLogo url={custom?.logo} origin={company.origin} expectedSha={custom?.logo_sha256} />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Txt bold numberOfLines={1} style={{ fontSize: 17, lineHeight: 20 }}>
+              {custom?.company_name ?? company.origin}
+            </Txt>
+            <Txt numberOfLines={1} style={{ fontFamily: mono, fontSize: 12, color: c.text2 }}>
+              {company.origin}
+            </Txt>
+          </View>
+        </View>
+        <IconButton label="Refresh" onPress={() => void actions.syncCompanyNow(company.origin)}>
+          {syncing ? <ActivityIndicator color={c.text} /> : <ArrowClockwise size={22} color={c.text} />}
+        </IconButton>
+        <IconButton label="Settings" onPress={() => setShowSettings(true)}>
+          <GearSix size={24} color={c.text} />
+        </IconButton>
+        {companies.length === 1 ? (
+          <IconButton label="Add company" onPress={onAdd}>
+            <Plus size={24} color={c.text} />
+          </IconButton>
+        ) : null}
+      </AppBar>
+
+      <FlatList
+        data={visible}
+        keyExtractor={(s) => s.id}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center', paddingBottom: insets.bottom }}
+        ListHeaderComponent={header}
+        ListEmptyComponent={empty}
+        ListFooterComponent={footer}
+        ItemSeparatorComponent={() => <Divider />}
+        onViewableItemsChanged={onViewableItemsChanged}
+        viewabilityConfig={viewabilityConfig}
+        renderItem={({ item: stored }) => (
+          <FeedArticle company={company} stored={stored} onLinkTap={(url) => setPendingLink({ url, item: stored.item })} />
         )}
-        {anyFollowed && visible.length === 0 && (
-          <div className="empty">
-            <div className="t-section">No messages yet</div>
-            <p className="t-small t-muted" style={{ maxWidth: 280 }}>
-              Messages appear here as soon as the company publishes.
-            </p>
-          </div>
-        )}
-        {visible.map((stored) => (
-          <FeedArticle
-            key={stored.id}
-            company={company}
-            stored={stored}
-            onLinkTap={(url) => setPendingLink({ url, item: stored.item })}
-            onRead={() => {
-              if (!stored.read) {
-                const feedKey = stored.isPrivate ? `private:${stored.feedUrl}` : `public:${stored.channel}`;
-                void actions.markRead(company.origin, feedKey, stored.item.id!, true);
-              }
-            }}
-          />
-        ))}
-        {visible.length > 0 && (
-          <div className="footer-note" style={{ margin: '24px 20px 32px' }}>
-            <LockSimple size={16} weight="fill" style={{ flexShrink: 0, marginTop: 2 }} />
-            <span>This channel will never ask you for a password, seed, or code.</span>
-          </div>
-        )}
-      </div>
+      />
 
-      {showSettings && <SettingsSheet company={company} items={items} onClose={() => setShowSettings(false)} />}
+      {showSettings ? (
+        <SettingsSheet company={company} items={items} onRemove={remove} onClose={() => setShowSettings(false)} />
+      ) : null}
 
-      {pendingLink && (
+      {pendingLink ? (
         <LinkConfirm
           url={pendingLink.url}
           onConfirm={() => {
@@ -265,8 +270,8 @@ export function CompanyView({
           }}
           onCancel={() => setPendingLink(null)}
         />
-      )}
-    </div>
+      ) : null}
+    </View>
   );
 }
 
@@ -275,15 +280,14 @@ function FeedArticle({
   company,
   stored,
   onLinkTap,
-  onRead,
 }: {
   company: CompanyRecord;
   stored: StoredItem;
   onLinkTap: (url: string) => void;
-  onRead: () => void;
 }) {
-  const ref = useRef<HTMLElement>(null);
+  const c = useColors();
   const [img, setImg] = useState<string | null>(null);
+  const [showTime, setShowTime] = useState(false);
   const item = stored.item;
 
   useEffect(() => {
@@ -291,83 +295,68 @@ function FeedArticle({
     const url = item.image;
     if (!url) return;
     // a linked image is hash-pinned by image_sha256 (spec/feeds.md §1.1)
-    void loadImage(url, stored.origin, item.image_sha256).then((objectUrl) => {
-      if (alive) setImg(objectUrl);
+    void loadImage(url, stored.origin, item.image_sha256).then((uri) => {
+      if (alive) setImg(uri);
     });
     return () => {
       alive = false;
     };
   }, [item.image, item.image_sha256, stored.origin]);
 
-  // mark as read when it scrolls into view (no detail view anymore)
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const io = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
-            onRead();
-            io.disconnect();
-          }
-        }
-      },
-      { threshold: 0.6 },
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, [onRead]);
-
   const published = item.date_published ?? '';
   const date = published ? formatDate(published) : '';
-  const dateTime = published ? formatDateTime(published) : '';
-  const [showTime, setShowTime] = useState(false);
 
   return (
-    <article className="article-card" ref={ref}>
-      {img && <img className="article-img" src={img} alt="" loading="lazy" />}
-      <div className="article-card-body">
-        <h2 className="article-card-title">{item.title ?? 'Untitled'}</h2>
-        <div className="article-card-meta">
-          {date && (
-            <button
-              type="button"
-              className="meta-time"
-              title={showTime ? 'Hide the time' : 'Show the exact time'}
-              onClick={() => setShowTime((v) => !v)}
+    <View style={{ paddingHorizontal: 20, paddingTop: 20 }}>
+      {img ? (
+        <VerifiedImage uri={img} aspectRatio={1} style={{ borderRadius: radius.card, overflow: 'hidden', backgroundColor: c.surface2 }} />
+      ) : null}
+      <View style={{ paddingTop: 14 }}>
+        <Txt accessibilityRole="header" style={{ fontSize: 24, lineHeight: 30, fontWeight: '700', marginBottom: 8 }}>
+          {item.title ?? 'Untitled'}
+        </Txt>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 14 }}>
+          {date ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityHint={showTime ? 'Hide the time' : 'Show the exact time'}
+              onPress={() => setShowTime((v) => !v)}
             >
-              {showTime ? dateTime : date}
-            </button>
-          )}
-          {stored.updated && <span className="chip chip-accent">Updated</span>}
+              <Txt variant="small" style={{ textDecorationLine: 'underline', textDecorationStyle: 'dotted' }}>
+                {showTime ? formatDateTime(published) : date}
+              </Txt>
+            </Pressable>
+          ) : null}
+          {stored.updated ? <Chip label="Updated" accent /> : null}
           {(item.tags ?? []).slice(0, 4).map((tag) => (
-            <span key={tag} className="chip">
-              {tag}
-            </span>
+            <Chip key={tag} label={tag} />
           ))}
-        </div>
-        <SanitizedHtml
+        </View>
+        <RichText
           html={item.content_html ?? ''}
           origin={company.origin}
           item={item}
           loadRemoteMedia={company.prefs.loadRemoteMedia}
           onLinkTap={onLinkTap}
         />
-      </div>
-    </article>
+      </View>
+    </View>
   );
 }
 
 function SettingsSheet({
   company,
   items,
+  onRemove,
   onClose,
 }: {
   company: CompanyRecord;
   items: StoredItem[];
+  onRemove: () => void;
   onClose: () => void;
 }) {
   const { actions } = useApp();
+  const c = useColors();
   const [languages, setLanguages] = useState<string[]>(company.prefs.languages);
   const [tags, setTags] = useState<string[]>(company.prefs.tags);
   const companyItems = items.filter((i) => i.origin === company.origin);
@@ -376,10 +365,7 @@ function SettingsSheet({
     () => [...new Set(companyItems.map((i) => i.item.language).filter((l): l is string => !!l))].sort(),
     [companyItems],
   );
-  const allTags = useMemo(
-    () => [...new Set(companyItems.flatMap((i) => i.item.tags ?? []))].sort(),
-    [companyItems],
-  );
+  const allTags = useMemo(() => [...new Set(companyItems.flatMap((i) => i.item.tags ?? []))].sort(), [companyItems]);
 
   function toggleLanguage(lang: string) {
     const next = languages.includes(lang) ? languages.filter((l) => l !== lang) : [...languages, lang];
@@ -394,131 +380,99 @@ function SettingsSheet({
   }
 
   return (
-    <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="t-section" style={{ marginBottom: 12 }}>
-          Settings
-        </div>
+    <Sheet onClose={onClose}>
+      <Txt variant="section" style={{ marginBottom: 12 }}>
+        Settings
+      </Txt>
 
-        <div className="t-small" style={{ fontWeight: 600, marginBottom: 4 }}>
-          Channels
-        </div>
-        {company.channels.map((c) => (
-          <ChannelToggle
-            key={c.name}
-            channel={c}
-            onToggle={(followed) => void actions.toggleChannel(company.origin, c.name, followed)}
-          />
-        ))}
+      <SheetLabel first>Channels</SheetLabel>
+      {company.channels.map((ch) => (
+        <ChannelToggle
+          key={ch.name}
+          channel={ch}
+          onToggle={(followed) => void actions.toggleChannel(company.origin, ch.name, followed)}
+        />
+      ))}
 
-        {company.privateFeeds.length > 0 && (
-          <>
-            <div className="t-small" style={{ fontWeight: 600, margin: '16px 0 4px' }}>
-              Orders
-            </div>
-            {company.privateFeeds.map((f) => (
-              <div key={f.url} className="row" style={{ borderBottom: 'none' }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="t-body" style={{ fontWeight: 600 }}>
-                    {f.displayName ?? 'Delivery'}
-                  </div>
-                  <div className="t-small" style={{ wordBreak: 'break-all' }}>
-                    {f.closed ? 'Finished' : f.expires ? `Open until ${f.expires.slice(0, 10)}` : 'Open'}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </>
-        )}
+      {company.privateFeeds.length > 0 ? (
+        <>
+          <SheetLabel>Orders</SheetLabel>
+          {company.privateFeeds.map((f) => (
+            <View key={f.url} style={{ paddingVertical: 8 }}>
+              <Txt bold>{f.displayName ?? 'Delivery'}</Txt>
+              <Txt variant="small">
+                {f.closed ? 'Finished' : f.expires ? `Open until ${f.expires.slice(0, 10)}` : 'Open'}
+              </Txt>
+            </View>
+          ))}
+        </>
+      ) : null}
 
-        <div className="t-small" style={{ fontWeight: 600, margin: '16px 0 4px' }}>
-          Language
-        </div>
-        {allLanguages.length === 0 ? (
-          <p className="t-small t-muted" style={{ margin: 0 }}>
-            No messages yet.
-          </p>
-        ) : (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {allLanguages.map((lang) => (
-              <button
-                key={lang}
-                className={`chip ${languages.includes(lang) ? 'chip-accent' : ''}`}
-                onClick={() => toggleLanguage(lang)}
-              >
-                {lang}
-              </button>
-            ))}
-          </div>
-        )}
+      <SheetLabel>Language</SheetLabel>
+      <ChipGroup options={allLanguages} selected={languages} onToggle={toggleLanguage} />
 
-        <div className="t-small" style={{ fontWeight: 600, margin: '16px 0 4px' }}>
-          Tags
-        </div>
-        {allTags.length === 0 ? (
-          <p className="t-small t-muted" style={{ margin: 0 }}>
-            No messages yet.
-          </p>
-        ) : (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {allTags.map((tag) => (
-              <button
-                key={tag}
-                className={`chip ${tags.includes(tag) ? 'chip-accent' : ''}`}
-                onClick={() => toggleTag(tag)}
-              >
-                {tag}
-              </button>
-            ))}
-          </div>
-        )}
+      <SheetLabel>Tags</SheetLabel>
+      <ChipGroup options={allTags} selected={tags} onToggle={toggleTag} />
 
-        <div className="t-small" style={{ fontWeight: 600, margin: '16px 0 4px' }}>
-          Remote media
-        </div>
-        <button
-          className={`chip ${company.prefs.loadRemoteMedia ? 'chip-accent' : ''}`}
-          onClick={() =>
-            void actions.setPrefs(company.origin, { loadRemoteMedia: !company.prefs.loadRemoteMedia })
-          }
-        >
-          {company.prefs.loadRemoteMedia ? 'Load images from the web' : 'Images off (privacy)'}
-        </button>
+      <SheetLabel>Remote media</SheetLabel>
+      <View style={{ flexDirection: 'row' }}>
+        <Chip
+          accent={company.prefs.loadRemoteMedia}
+          label={company.prefs.loadRemoteMedia ? 'Load images from the web' : 'Images off (privacy)'}
+          onPress={() => void actions.setPrefs(company.origin, { loadRemoteMedia: !company.prefs.loadRemoteMedia })}
+        />
+      </View>
 
-        <hr className="divider" style={{ margin: '20px 0' }} />
-        <button
-          className="btn btn-danger"
-          onClick={() => {
-            if (window.confirm(`Remove ${company.origin}? All saved messages are deleted from this device.`)) {
-              void actions.removeCompany(company.origin);
-            }
-          }}
-        >
-          <Trash size={20} /> Remove company
-        </button>
-        <BuildStamp />
-      </div>
-    </div>
+      <Divider style={{ marginVertical: 20 }} />
+      <Button kind="danger" label="Remove company" icon={<Trash size={20} color={c.danger} />} onPress={onRemove} />
+      <BuildStamp />
+    </Sheet>
   );
 }
 
-function ChannelToggle({
-  channel,
+function SheetLabel({ children, first }: { children: string; first?: boolean }) {
+  return (
+    <Txt variant="small" bold accessibilityRole="header" style={{ marginTop: first ? 0 : 16, marginBottom: 4 }}>
+      {children}
+    </Txt>
+  );
+}
+
+function ChipGroup({
+  options,
+  selected,
   onToggle,
 }: {
-  channel: ChannelState;
-  onToggle: (followed: boolean) => void;
+  options: string[];
+  selected: string[];
+  onToggle: (value: string) => void;
 }) {
+  if (options.length === 0) return <Txt variant="small">No messages yet.</Txt>;
   return (
-    <button className="row" onClick={() => onToggle(!channel.followed)}>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div className="t-body" style={{ fontWeight: 600, display: 'flex', gap: 8, alignItems: 'center' }}>
-          {channel.displayName}
-          {channel.isNew && <span className="badge-new">New</span>}
-        </div>
-        {channel.description && <div className="t-small">{channel.description}</div>}
-      </div>
-      <div className={`toggle ${channel.followed ? 'toggle-on' : ''}`} aria-label={channel.displayName} />
-    </button>
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+      {options.map((o) => (
+        <Chip key={o} label={o} accent={selected.includes(o)} onPress={() => onToggle(o)} />
+      ))}
+    </View>
+  );
+}
+
+function ChannelToggle({ channel, onToggle }: { channel: ChannelState; onToggle: (followed: boolean) => void }) {
+  const c = useColors();
+  return (
+    <Row label={channel.displayName} selected={channel.followed} onPress={() => onToggle(!channel.followed)}>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+          <Txt bold>{channel.displayName}</Txt>
+          {channel.isNew ? (
+            <View style={{ backgroundColor: c.accent, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2 }}>
+              <Txt style={{ color: c.onAccent, fontSize: 11, lineHeight: 15, fontWeight: '700', letterSpacing: 0.4 }}>NEW</Txt>
+            </View>
+          ) : null}
+        </View>
+        {channel.description ? <Txt variant="small">{channel.description}</Txt> : null}
+      </View>
+      <Toggle on={channel.followed} />
+    </Row>
   );
 }

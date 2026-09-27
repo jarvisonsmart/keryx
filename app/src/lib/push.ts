@@ -3,19 +3,20 @@
  *
  * One install has exactly one wake-up transport:
  * - web / PWA: the browser's PushManager — the endpoint leg (§6.2),
- * - Android with Google services: FCM topics — the topic leg (§6.1),
+ * - Android with Google services, and iOS with a configured Firebase app: FCM
+ *   topics — the topic leg (§6.1),
  * - de-Googled Android: a UnifiedPush distributor (ntfy today) — the same
  *   endpoint leg as the browser, over the distributor's connection (§6.3),
- * - Android without either: no wake-ups; the user is asked to install ntfy.
+ * - Android without either: no wake-ups; the user is asked to install ntfy,
+ * - iOS without Firebase: no wake-ups; polling remains the backstop.
  *
  * The choice is a capability probe, not a user setting: FCM is used only when the
  * device can actually use it, and the user never has to know which leg is active.
  * The relay needs no change for ntfy — its endpoint leg already delivers to any
  * WebPush endpoint, and ntfy.sh is an approved push origin by default (§5.6).
  */
-import { Capacitor } from '@capacitor/core';
-import { Browser } from '@capacitor/browser';
 import { nativePushSupport, KeryxPush, type NativePushSupport } from './native-push';
+import { appPlatform, openExternal } from './platform';
 import { ensureFcmTopics, fcmTopicsSynced } from './fcm';
 import { ensureRelayRegistration, topicBindings, type SubscriptionSource } from './relay-sw';
 import { relayBaseUrl } from './relay';
@@ -33,7 +34,7 @@ export const NTFY_PACKAGE = 'io.heckel.ntfy';
 
 /** Probe the native transports; the web has none of its own (PushManager instead). */
 export async function pushSupport(): Promise<PushSupport> {
-  if (Capacitor.getPlatform() !== 'android') {
+  if (appPlatform() === 'web') {
     return { fcm: false, unifiedPush: { available: false, distributors: [] } };
   }
   try {
@@ -53,14 +54,13 @@ export function pushTransport(support: PushSupport): PushTransport {
 
 /** The transport this install should use right now. */
 export async function currentPushTransport(): Promise<PushTransport> {
-  if (Capacitor.getPlatform() === 'android') return pushTransport(await pushSupport());
+  if (appPlatform() !== 'web') return pushTransport(await pushSupport());
   return typeof window !== 'undefined' && 'PushManager' in window ? 'webpush' : 'none';
 }
 
 /** Open the ntfy install page in the system browser. */
 export async function openNtfyInstallPage(): Promise<void> {
-  if (Capacitor.isNativePlatform()) await Browser.open({ url: NTFY_INSTALL_URL });
-  else window.open(NTFY_INSTALL_URL, '_blank', 'noopener,noreferrer');
+  await openExternal(NTFY_INSTALL_URL);
 }
 
 /**
@@ -77,12 +77,15 @@ export async function ensurePushWakeups(companies: CompanyRecord[]): Promise<voi
     }
     // the FCM topic subscribe failed: fall back to UnifiedPush
   }
+  // iOS has no endpoint leg of its own (the app is not a browser)
+  if (appPlatform() === 'ios') return;
   await ensureRelayRegistration(companies);
 }
 
 /** Whether this install's wake-ups are set up for the given company. */
 export async function wakeupsCurrent(company: CompanyRecord): Promise<boolean> {
   if ((await pushSupport()).fcm) return fcmTopicsSynced(await getAllCompanies());
+  if (appPlatform() === 'ios') return false;
   const base = relayBaseUrl();
   if (!base) return false;
   const relay = await ensureRelayRegistration(await getAllCompanies());
@@ -97,6 +100,7 @@ export async function wakeupsCurrent(company: CompanyRecord): Promise<boolean> {
  */
 async function dropEndpointRegistration(): Promise<void> {
   await ensureRelayRegistration([]);
+  if (appPlatform() !== 'android') return;
   try {
     await KeryxPush.setRegistration({ registration: null });
     await KeryxPush.unregister();
@@ -106,7 +110,7 @@ async function dropEndpointRegistration(): Promise<void> {
 }
 
 /**
- * The UnifiedPush connector as a subscription source (Android only). The page
+ * The UnifiedPush connector as a subscription source (Android only). The app
  * installs it with `setSubscriptionSource`; the service worker never imports it.
  */
 export const nativePushSource: SubscriptionSource = {

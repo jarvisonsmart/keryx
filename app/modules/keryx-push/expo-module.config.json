@@ -1,0 +1,10 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["KeryxPushModule"],
+    "appDelegateSubscribers": ["KeryxPushAppDelegate"]
+  },
+  "android": {
+    "modules": ["cz.v1b3coder.keryx.push.KeryxPushModule"]
+  }
+}

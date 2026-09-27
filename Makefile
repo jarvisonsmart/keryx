@@ -1,7 +1,7 @@
 # Keryx — common build and verification tasks.
 #
 # Layout: sdk/ (publisher SDK + pub CLI), relay/ (notification relay),
-# demo-tool/ (SDK-backed demo site generator), app/ (PWA / Capacitor client).
+# demo-tool/ (SDK-backed demo site generator), app/ (Expo client: PWA, Android, iOS).
 #
 # Run `make` (or `make help`) for the target list.
 
@@ -112,7 +112,7 @@ demo-tool: ## Build the demo site generator into bin/demo-tool
 	mkdir -p $(BIN)
 	cd $(DEMO_TOOL_DIR) && $(GO) build -o $(CURDIR)/$(BIN)/demo-tool .
 
-# --- PWA / Capacitor app ------------------------------------------------------
+# --- app (Expo: PWA, Android, iOS) --------------------------------------------
 
 # A stamp so `npm install` runs only when the lockfile changes (the
 # node_modules directory mtime is not a reliable prerequisite).
@@ -123,14 +123,14 @@ $(APP_DEPS_STAMP): $(APP_DIR)/package-lock.json
 .PHONY: app-install app-dev app-build app-build-pages app-test app-test-sdk app-icons apk
 app-install: $(APP_DEPS_STAMP) ## Install the app dependencies (npm install)
 
-app-dev: $(APP_DEPS_STAMP) ## Run the app dev server (Vite)
-	cd $(APP_DIR) && $(NPM) run dev
+app-dev: $(APP_DEPS_STAMP) ## Run the web app dev server (Expo)
+	cd $(APP_DIR) && $(NPM) run web
 
 app-build: $(APP_DEPS_STAMP) ## Build the PWA into app/dist
 	cd $(APP_DIR) && $(NPM) run build
 
 app-build-pages: $(APP_DEPS_STAMP) ## Build the PWA for a GitHub Pages project site
-	cd $(APP_DIR) && VITE_BASE=/keryx/ $(NPM) run build
+	cd $(APP_DIR) && EXPO_BASE_URL=/keryx/ $(NPM) run build
 
 app-test: $(DEMO_REPO)/join.txt $(APP_DEPS_STAMP) ## Run the protocol tests against the generated demo
 	cd $(APP_DIR) && KERYX_DEMO_DIR=$(abspath $(DEMO_REPO)) KERYX_KEYSTORE=$(abspath $(DEMO_KEYS_DIR)) $(NPM) test
@@ -142,7 +142,7 @@ app-icons: $(APP_DEPS_STAMP) ## Regenerate the PWA icons
 	cd $(APP_DIR) && $(NPM) run icons
 
 apk: $(APP_DEPS_STAMP) ## Build the Android debug APK (needs the Android SDK)
-	cd $(APP_DIR) && $(NPM) run cap:android
+	cd $(APP_DIR) && npx expo prebuild --platform android --no-install && cd android && ./gradlew assembleDebug
 
 # Generate the demo on first use; `make demo` regenerates explicitly.
 $(DEMO_REPO)/join.txt:

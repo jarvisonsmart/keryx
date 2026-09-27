@@ -5,7 +5,9 @@
  * enable/retry in this session, never a persistent status row.
  */
 import type { NotificationState } from '../lib/notify';
+import { appPlatform } from '../lib/platform';
 import { openNtfyInstallPage } from '../lib/push';
+import { Banner, Button } from './kit';
 
 export function NotificationBanner({
   state,
@@ -21,75 +23,72 @@ export function NotificationBanner({
   onCheck: () => void;
   onRetry: () => void;
 }) {
-  if (state.kind === 'checking') return null;
-  if (state.kind === 'no-transport') {
-    return (
-      <div className="banner banner-danger">
-        <span>Notifications need ntfy on this device.</span>
-        <button className="btn btn-primary" onClick={() => void openNtfyInstallPage()}>
-          Install ntfy
-        </button>
-        <button className="btn btn-secondary" onClick={onCheck}>
-          Check again
-        </button>
-      </div>
-    );
+  const settings = appPlatform() === 'web' ? 'your browser or system settings' : 'the system settings';
+  switch (state.kind) {
+    case 'checking':
+      return null;
+    case 'no-transport':
+      return (
+        <Banner
+          tone="danger"
+          text="Notifications need ntfy on this device."
+          actions={
+            <>
+              <Button compact label="Install ntfy" onPress={() => void openNtfyInstallPage()} />
+              <Button compact kind="secondary" label="Check again" onPress={onCheck} />
+            </>
+          }
+        />
+      );
+    case 'unsupported':
+      return (
+        <Banner
+          tone="neutral"
+          text={`Notifications are unavailable ${appPlatform() === 'web' ? 'in this browser' : 'on this device'} — messages still arrive by polling.`}
+        />
+      );
+    case 'pending':
+      return <Banner tone="neutral" text="Notifications are on — the first test is still on its way." />;
+    case 'ok':
+      return freshTest ? <Banner tone="ok" text="Notifications are working." /> : null;
+    case 'default':
+    case 'no-subscription':
+      return (
+        <Banner
+          tone="danger"
+          text="Turn on notifications to get timely updates."
+          actions={<Button compact label="Turn on" onPress={onEnable} />}
+        />
+      );
+    case 'unregistered':
+      return (
+        <Banner
+          tone="danger"
+          text="Notifications need to be re-enabled."
+          actions={<Button compact label="Re-subscribe" onPress={onEnable} />}
+        />
+      );
+    case 'denied':
+      return (
+        <Banner
+          tone="danger"
+          text={`Notifications are off. Allow them in ${settings}, then check again.`}
+          actions={<Button compact label="Check again" onPress={onCheck} />}
+        />
+      );
+    case 'failed':
+      return (
+        <Banner
+          tone="danger"
+          text={
+            state.leg === 'registration'
+              ? 'Notifications could not be registered. Try again.'
+              : state.leg === 'topic'
+                ? 'The test wake-up was not sent. Try again.'
+                : 'The test notification did not arrive. Try again.'
+          }
+          actions={<Button compact label="Try again" onPress={onRetry} />}
+        />
+      );
   }
-  if (state.kind === 'unsupported') {
-    return (
-      <div className="banner banner-neutral">
-        Notifications are unavailable in this browser — messages still arrive by polling.
-      </div>
-    );
-  }
-  if (state.kind === 'pending') {
-    return (
-      <div className="banner banner-neutral">
-        Notifications are on — the first test is still on its way.
-      </div>
-    );
-  }
-  if (state.kind === 'ok') {
-    if (!freshTest) return null;
-    return <div className="banner banner-ok">Notifications are working.</div>;
-  }
-  if (state.kind === 'default' || state.kind === 'no-subscription') {
-    return (
-      <div className="banner banner-danger">
-        <span>Turn on notifications to get timely updates.</span>
-        <button className="btn btn-primary" onClick={onEnable}>
-          Turn on
-        </button>
-      </div>
-    );
-  }
-  if (state.kind === 'unregistered') {
-    return (
-      <div className="banner banner-danger">
-        <span>Notifications need to be re-enabled.</span>
-        <button className="btn btn-primary" onClick={onEnable}>
-          Re-subscribe
-        </button>
-      </div>
-    );
-  }
-  const message =
-    state.kind === 'denied'
-      ? 'Notifications are off. Allow them in your browser or system settings, then check again.'
-      : state.leg === 'registration'
-        ? 'Notifications could not be registered. Try again.'
-        : state.leg === 'topic'
-          ? 'The test wake-up was not sent. Try again.'
-          : 'The test notification did not arrive. Try again.';
-  return (
-    <div className="banner banner-danger">
-      <span>{message}</span>
-      <button
-        className="btn btn-primary"
-        onClick={state.kind === 'failed' ? onRetry : onCheck}
-      >
-        {state.kind === 'failed' ? 'Try again' : 'Check again'}
-      </button>
-    </div>
-  );
 }

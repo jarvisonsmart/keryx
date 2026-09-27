@@ -1,9 +1,10 @@
 /**
- * Local-only persistence: IndexedDB for companies + verified items + media.
- * Nothing here ever leaves the device (zero PII, no server state).
+ * Local-only persistence: companies + verified items + media (IndexedDB on
+ * the web, SQLite on the apps — see db.ts). Nothing here ever leaves the
+ * device (zero PII, no server state).
  */
 
-import { openDB, type IDBPDatabase } from 'idb';
+import { openAppDb } from './db';
 import type { RootDoc, TargetsDoc, SeenVersions } from './tuf';
 import type { FeedItem } from './item';
 import type { RelayRegistration } from './relay';
@@ -95,96 +96,45 @@ export const defaultPrefs = (): Prefs => ({
   loadRemoteMedia: true,
 });
 
-const DB_NAME = 'keryx';
-const DB_VERSION = 5;
-
-let dbPromise: Promise<IDBPDatabase> | null = null;
-
-export function openAppDb(): Promise<IDBPDatabase> {
-  if (!dbPromise) {
-    dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db, oldVersion) {
-        // This is a fresh implementation: previous layouts (the earlier web
-        // client, or pre-rewrite shapes) are incompatible — drop and rebuild
-        // rather than attempt an unreliable migration.
-        if (oldVersion > 0) {
-          for (const name of ['contacts', 'items', 'media', 'companies', 'relay', 'registrations']) {
-            if (db.objectStoreNames.contains(name)) db.deleteObjectStore(name);
-          }
-        }
-        db.createObjectStore('companies', { keyPath: 'origin' });
-        const items = db.createObjectStore('items', { keyPath: 'id' });
-        items.createIndex('by-origin', 'origin');
-        const media = db.createObjectStore('media', { keyPath: 'url' });
-        media.createIndex('by-origin', 'origin');
-        // relay wake-up state: per-topic replay high-water marks and the
-        // per-company recovery cooldown (relay/SPECIFICATION.md §4.2)
-        db.createObjectStore('relay', { keyPath: 'key' });
-        // the app-wide relay registration: one record per relay base URL,
-        // holding the union of every followed company's topics
-        db.createObjectStore('registrations', { keyPath: 'baseUrl' });
-      },
-    });
-  }
-  return dbPromise;
-}
+const db = openAppDb();
 
 // --- companies ---
 
 export async function getAllCompanies(): Promise<CompanyRecord[]> {
-  const db = await openAppDb();
-  const list = (await db.getAll('companies')) as CompanyRecord[];
+  const list = await db.getAll<CompanyRecord>('companies');
   return list.sort((a, b) => a.joinedAt - b.joinedAt);
 }
 
 export async function getCompany(origin: string): Promise<CompanyRecord | undefined> {
-  const db = await openAppDb();
-  return (await db.get('companies', origin)) as CompanyRecord | undefined;
+  return db.get<CompanyRecord>('companies', origin);
 }
 
 export async function putCompany(company: CompanyRecord): Promise<void> {
-  const db = await openAppDb();
-  await db.put('companies', company);
+  await db.putMany('companies', [company]);
 }
 
 export async function deleteCompany(origin: string): Promise<void> {
-  const db = await openAppDb();
-  await db.delete('companies', origin);
-  const tx = db.transaction(['items', 'media'], 'readwrite');
-  await deleteByIndex(tx.objectStore('items'), 'by-origin', origin);
-  await deleteByIndex(tx.objectStore('media'), 'by-origin', origin);
-  await tx.done;
-}
-
-async function deleteByIndex(store: any, indexName: string, value: string): Promise<void> {
-  const idx = store.index(indexName);
-  let cursor = await idx.openCursor(IDBKeyRange.only(value));
-  while (cursor) {
-    await cursor.delete();
-    cursor = await cursor.continue();
-  }
+  await db.deleteMany('companies', [origin]);
+  await db.deleteByOrigin('items', origin);
+  await db.deleteByOrigin('media', origin);
 }
 
 // --- app-wide relay registration (relay/SPECIFICATION.md §5.3) ---
 
 export async function getRegistration(baseUrl: string): Promise<RelayRegistration | undefined> {
-  const db = await openAppDb();
-  return (await db.get('registrations', baseUrl)) as RelayRegistration | undefined;
+  return db.get<RelayRegistration>('registrations', baseUrl);
 }
 
 export async function getRegistrations(): Promise<RelayRegistration[]> {
-  const db = await openAppDb();
-  return (await db.getAll('registrations')) as RelayRegistration[];
+  return db.getAll<RelayRegistration>('registrations');
 }
 
 export async function putRegistration(reg: RelayRegistration): Promise<void> {
-  const db = await openAppDb();
-  await db.put('registrations', reg);
+  await db.putMany('registrations', [reg]);
 }
 
 export async function deleteRegistrationRecord(baseUrl: string): Promise<void> {
-  const db = await openAppDb();
-  await db.delete('registrations', baseUrl);
+  await db.deleteMany('registrations', [baseUrl]);
 }
 
 // --- items ---
@@ -202,43 +152,29 @@ export function privateFeedKey(url: string): string {
 }
 
 export async function getAllItems(): Promise<StoredItem[]> {
-  const db = await openAppDb();
-  return (await db.getAll('items')) as StoredItem[];
+  return db.getAll<StoredItem>('items');
 }
 
 export async function getItems(origin: string): Promise<StoredItem[]> {
-  const db = await openAppDb();
-  const all = (await db.getAll('items')) as StoredItem[];
-  return all.filter((i) => i.origin === origin);
+  return db.getAllByOrigin<StoredItem>('items', origin);
 }
 
 export async function getItem(origin: string, feedKey: string, itemId: string): Promise<StoredItem | undefined> {
-  const db = await openAppDb();
-  return (await db.get('items', itemKey(origin, feedKey, itemId))) as StoredItem | undefined;
+  return db.get<StoredItem>('items', itemKey(origin, feedKey, itemId));
 }
 
 export async function putItems(items: StoredItem[]): Promise<void> {
-  const db = await openAppDb();
-  const tx = db.transaction('items', 'readwrite');
-  for (const item of items) await tx.store.put(item);
-  await tx.done;
+  await db.putMany('items', items);
 }
 
 export async function deleteItems(ids: string[]): Promise<void> {
-  const db = await openAppDb();
-  const tx = db.transaction('items', 'readwrite');
-  for (const id of ids) await tx.store.delete(id);
-  await tx.done;
+  await db.deleteMany('items', ids);
 }
 
 export async function markRead(origin: string, feedKey: string, itemId: string, read: boolean): Promise<void> {
-  const db = await openAppDb();
-  const id = itemKey(origin, feedKey, itemId);
-  const item = (await db.get('items', id)) as StoredItem | undefined;
-  if (item) {
-    item.read = read;
-    await db.put('items', item);
-  }
+  await db.update<StoredItem>('items', itemKey(origin, feedKey, itemId), (item) =>
+    item ? { ...item, read } : undefined,
+  );
 }
 
 // --- media cache (images/logo bytes keyed by URL) ---
@@ -252,20 +188,15 @@ export interface CachedMedia {
 }
 
 export async function getMedia(url: string): Promise<CachedMedia | undefined> {
-  const db = await openAppDb();
-  return (await db.get('media', url)) as CachedMedia | undefined;
+  return db.get<CachedMedia>('media', url);
 }
 
 export async function putMedia(entry: CachedMedia): Promise<void> {
-  const db = await openAppDb();
-  await db.put('media', entry);
+  await db.putMany('media', [entry]);
 }
 
 export async function deleteMediaFor(origin: string): Promise<void> {
-  const db = await openAppDb();
-  const tx = db.transaction('media', 'readwrite');
-  await deleteByIndex(tx.store, 'by-origin', origin);
-  await tx.done;
+  await db.deleteByOrigin('media', origin);
 }
 
 // --- prefs (per company, stored on the company record) ---
@@ -280,21 +211,18 @@ interface RelayStateRecord {
 
 /** The last accepted `seq` for a topic (zero when never accepted). */
 export async function relaySeq(origin: string, topic: string): Promise<number> {
-  const db = await openAppDb();
-  const rec = (await db.get('relay', `seq\u0000${origin}\u0000${topic}`)) as RelayStateRecord | undefined;
+  const rec = await db.get<RelayStateRecord>('relay', `seq\u0000${origin}\u0000${topic}`);
   return rec?.seq ?? 0;
 }
 
 /** Persist the last accepted `seq` for a topic (verified wake-ups only). */
 export async function setRelaySeq(origin: string, topic: string, seq: number): Promise<void> {
-  const db = await openAppDb();
-  await db.put('relay', { key: `seq\u0000${origin}\u0000${topic}`, seq });
+  await db.putMany('relay', [{ key: `seq\u0000${origin}\u0000${topic}`, seq }]);
 }
 
 /** The recovery-cooldown expiry for a company (0 when never attempted). */
 export async function relayRecoveryAt(origin: string): Promise<number> {
-  const db = await openAppDb();
-  const rec = (await db.get('relay', `recovery\u0000${origin}`)) as RelayStateRecord | undefined;
+  const rec = await db.get<RelayStateRecord>('relay', `recovery\u0000${origin}`);
   return rec?.at ?? 0;
 }
 
@@ -304,28 +232,19 @@ export async function relayRecoveryAt(origin: string): Promise<number> {
  * networking. Returns false when the allowance is still in force.
  */
 export async function reserveRecovery(origin: string, now: number, cooldownMs: number): Promise<boolean> {
-  const db = await openAppDb();
-  const tx = db.transaction('relay', 'readwrite');
   const key = `recovery\u0000${origin}`;
-  const rec = (await tx.store.get(key)) as RelayStateRecord | undefined;
-  if (rec?.at && now < rec.at) {
-    await tx.done;
-    return false;
-  }
-  await tx.store.put({ key, at: now + cooldownMs });
-  await tx.done;
-  return true;
+  return db.update<RelayStateRecord>('relay', key, (rec) =>
+    rec?.at && now < rec.at ? undefined : { key, at: now + cooldownMs },
+  );
 }
 
 /** The last wake-up this install accepted for a company (epoch ms). */
 export async function markPushReceived(origin: string, at: number): Promise<void> {
-  const db = await openAppDb();
-  await db.put('relay', { key: `push\u0000${origin}`, at });
+  await db.putMany('relay', [{ key: `push\u0000${origin}`, at }]);
 }
 
 export async function lastPushAt(origin: string): Promise<number> {
-  const db = await openAppDb();
-  const rec = (await db.get('relay', `push\u0000${origin}`)) as RelayStateRecord | undefined;
+  const rec = await db.get<RelayStateRecord>('relay', `push\u0000${origin}`);
   return rec?.at ?? 0;
 }
 
@@ -343,19 +262,16 @@ export interface PendingRecovery {
  * state and its recovery allowance (design/notifications.md, worker rule).
  */
 export async function markPendingRecovery(pending: PendingRecovery): Promise<void> {
-  const db = await openAppDb();
-  await db.put('relay', { key: `recovery-pending\u0000${pending.origin}`, ...pending });
+  await db.putMany('relay', [{ key: `recovery-pending\u0000${pending.origin}`, ...pending }]);
 }
 
 export async function pendingRecoveries(): Promise<PendingRecovery[]> {
-  const db = await openAppDb();
-  const all = (await db.getAll('relay')) as (PendingRecovery & { key: string })[];
+  const all = await db.getAll<PendingRecovery & { key: string }>('relay');
   return all.filter((r) => r.key.startsWith('recovery-pending\u0000'));
 }
 
 export async function clearPendingRecovery(origin: string): Promise<void> {
-  const db = await openAppDb();
-  await db.delete('relay', `recovery-pending\u0000${origin}`);
+  await db.deleteMany('relay', [`recovery-pending\u0000${origin}`]);
 }
 
 /** The pending self-test the service worker matches by nonce (§5.3.1). */
@@ -369,13 +285,11 @@ export interface PendingTest {
 }
 
 export async function putPendingTest(t: PendingTest): Promise<void> {
-  const db = await openAppDb();
-  await db.put('relay', { key: `test\u0000${t.baseUrl}`, ...t });
+  await db.putMany('relay', [{ key: `test\u0000${t.baseUrl}`, ...t }]);
 }
 
 export async function pendingTest(baseUrl: string): Promise<PendingTest | undefined> {
-  const db = await openAppDb();
-  const rec = (await db.get('relay', `test\u0000${baseUrl}`)) as (PendingTest & { key: string }) | undefined;
+  const rec = await db.get<PendingTest & { key: string }>('relay', `test\u0000${baseUrl}`);
   if (!rec) return undefined;
   return {
     baseUrl: rec.baseUrl,
@@ -387,8 +301,7 @@ export async function pendingTest(baseUrl: string): Promise<PendingTest | undefi
 }
 
 export async function clearPendingTest(baseUrl: string): Promise<void> {
-  const db = await openAppDb();
-  await db.delete('relay', `test\u0000${baseUrl}`);
+  await db.deleteMany('relay', [`test\u0000${baseUrl}`]);
 }
 
 export function makeCompany(

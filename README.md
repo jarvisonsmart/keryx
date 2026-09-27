@@ -157,8 +157,8 @@ security reviewers → `design/threats.md`; everyone else → `design/why.md`.
 - `sdk/` — reference **publisher SDK + `pub` CLI** (Go, go-tuf v2 +
   OLPC + Ed25519): the full publisher lifecycle (keys, channels, authors,
   private feeds, ceremonies, join/QR, deploy); see `sdk/README.md`
-- `app/` — reference demo **web client** (Vite + React + TS): PWA +
-  Capacitor Android/iOS; see `app/README.md`
+- `app/` — reference demo **client** (Expo + React Native + TS): PWA
+  (Expo web), Android and iOS; see `app/README.md`
 - `examples/` — small showcase consumers of the publisher SDK, each a
   separate module (own `go.mod`, `replace` to `../sdk`); `examples/sdk-artifact`
   generates a minimal signed artifact

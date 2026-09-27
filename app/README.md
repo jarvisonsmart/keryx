@@ -3,10 +3,10 @@
 Reference **client** for the Keryx protocol (see `../spec/`, `../design/` and
 the publisher demo in `../demo`). One codebase, four targets:
 
-- **Web** — plain Vite + React + TypeScript app
-- **PWA** — installable, offline-capable (service worker via vite-plugin-pwa)
-- **Android** — Capacitor native shell (`android/`, WebView + MLKit QR scanner)
-- **iOS** — Capacitor native shell (`ios/`, WebView + MLKit QR scanner)
+- **Web** — Expo web (React Native Web + TypeScript)
+- **PWA** — installable, offline-capable (custom service worker, `src/sw.ts`)
+- **Android** — Expo native app (React Native; FCM + UnifiedPush wake-ups)
+- **iOS** — Expo native app (React Native; FCM-over-APNs wake-ups)
 
 It implements the client flow end to end (spec/clients.md §1): QR/paste join
 URL → confirm the origin (the only human step, plain ASCII, nothing else on
@@ -25,7 +25,7 @@ PII, no per-user state anywhere.
 ```bash
 make demo DEMO_REPO=/tmp/keryx-demo DEMO_KEYS_DIR=/tmp/keryx-demo-keys DEMO_BASE=http://localhost:8000
 make serve-demo DEMO_REPO=/tmp/keryx-demo   # serve it at http://localhost:8000 (CORS-enabled)
-make app-dev                                # web client (Vite prints the port)
+make app-dev                                # web client (Expo prints the port)
 ```
 
 Then open the printed URL, tap **Add a company**, and paste the join URL from
@@ -37,32 +37,34 @@ subscribe) → subscribe → verified inbox.
 
 > The demo artifact signs metadata for `http://localhost:8000` (a
 > local-dev exception: the app allows HTTP for private feeds on loopback and
-> RFC 1918 private addresses; Android permits cleartext only for this demo
-> host via `network_security_config.xml`). A real deployment uses the
-> company's HTTPS origin.
+> RFC 1918 private addresses, in debug builds only; release Android builds
+> permit no cleartext at all via `network_security_config.xml`, see
+> `plugins/with-keryx-android.js`). A real deployment uses the company's
+> HTTPS origin.
 
 ## Deployment
 
 `main` builds and publishes to GitHub Pages automatically
 (`.github/workflows/deploy-pages.yml`): https://v1b3coder.github.io/keryx/
 
-The Pages build is a project site, so the workflow sets `VITE_BASE=/keryx/`
-(see `vite.config.ts`); `start_url`, `scope`, icon and asset URLs are relative
-or base-relative. Local dev and the Capacitor builds use the default `/`,
-so the same source works unmodified for Android/iOS. The manifest + service
-worker come from vite-plugin-pwa
-(`autoUpdate`, workbox precache of the whole `dist/`).
+The Pages build is a project site, so the workflow sets `EXPO_BASE_URL=/keryx/`
+(`experiments.baseUrl` in `app.config.ts`); the manifest's `start_url`,
+`scope` and icon URLs are relative (`public/manifest.webmanifest`). The
+service worker is bundled by `scripts/build-sw.mjs` (esbuild + a Workbox
+precache of the whole `dist/`); it activates immediately and the page reloads
+once onto the new build (`src/pwa.ts`).
 
 ## Scripts
 
 | Script | Purpose |
 |---|---|
-| `npm run dev` | Vite dev server (HMR) |
+| `npm run web` | Expo web dev server |
+| `npm run android` / `npm run ios` | Build and run the native app (`expo run:*`) |
 | `npm run test` | Vitest protocol + relay tests against the real `../demo` artifacts |
-| `npm run build` | Production build + PWA service worker (`dist/`) |
+| `npm run typecheck` | TypeScript check of the app, the service worker and the native module's JS |
+| `npm run build` | Production PWA export + service worker (`dist/`) |
+| `npm run preview` | Serve `dist/` on http://localhost:4173 (local E2E) |
 | `npm run icons` | Regenerate PWA icons (`public/icons/`) |
-| `npm run cap:sync` | Build + sync web assets into `android/` and `ios/` |
-| `npm run cap:android` | Build + sync + assemble Android debug APK |
 
 ## What's implemented (vs. the spec)
 
@@ -144,8 +146,9 @@ worker come from vite-plugin-pwa
 - **Filtering (spec/feeds.md §1)** — purely local; item `language`
   + free-form `tags` (stored locally, never sent); instant,
   offline.
-- **Rendering** — `content_html` sanitized (DOMPurify; scripts, forms,
-  iframes/embeds and content CSS stripped — the "never asks for a password,
+- **Rendering** — `content_html` parsed into an allowlisted render model
+  (`src/lib/richtext.ts`, rendered by `src/ui/RichText.tsx` on every
+  platform; scripts, forms, iframes/embeds and content CSS never make it in — the "never asks for a password,
   seed, or code" promise is structural, and stripping CSS is stricter than
   the spec's sandbox: nothing can escape because none is applied), links
   intercepted with their real destination domain shown before opening (no
@@ -155,8 +158,9 @@ worker come from vite-plugin-pwa
 - **Feed** — full articles inline (big square picture, title, date + tags,
   complete content) — there is no separate detail view; articles are marked
   read when they scroll into view.
-- **Offline-first** — IndexedDB cache of pinned metadata + verified items +
-  media bytes; sync on open + manual refresh.
+- **Offline-first** — local cache of pinned metadata + verified items + media
+  bytes (IndexedDB on the web, shared with the service worker; SQLite on the
+  apps — `src/lib/db*.ts`); sync on open + manual refresh.
 - **Wake-ups (relay/SPECIFICATION.md §4.2)** — the app derives the same topic
   as the relay (`keryx/relay/v1|` + OLPC `{company_id, scope_id, h}`), registers
   the installation's WebPush subscription with the relay (§5.3) and keeps the
@@ -171,12 +175,12 @@ worker come from vite-plugin-pwa
   permission, one push subscription, one relay record holding the union of every
   followed company's topics (see
   [`../design/notifications.md`](../design/notifications.md)). Configure
-  `VITE_RELAY_URL` and `VITE_VAPID_PUBLIC` at build time to enable it;
+  `EXPO_PUBLIC_RELAY_URL` and `EXPO_PUBLIC_VAPID_PUBLIC` at build time to enable it;
   without them the app runs exactly as before (polling is the backstop).
 
-**Android transport:** the Android shell probes the wake-up transport at startup
-and on `visibilitychange` (FCM > UnifiedPush > none). The FCM probe is the real
-`GoogleApiAvailability` check; when Google services are present the shell subscribes
+**Native transport:** the Android app probes the wake-up transport at startup
+and on returning to the foreground (FCM > UnifiedPush > none; iOS: FCM or none). The FCM probe is the real
+`GoogleApiAvailability` check; when Google services are present the app subscribes
 the Firebase SDK to the union of every followed company's topics (relay spec §6.1,
 registry-free and anonymous — the relay never learns the device's FCM token). A
 de-Googled device registers with the ntfy UnifiedPush distributor, which delivers
@@ -191,7 +195,7 @@ A production build uses the **staging relay by default**
 (`DEFAULT_RELAY_URL`/`DEFAULT_VAPID_PUBLIC` in `src/lib/relay.ts`:
 `https://keryx-relay.fly.dev` plus the public half of its
 `RELAY_VAPID_PRIVATE`), so the published PWA receives wake-ups with no build
-configuration. `VITE_RELAY_URL` and `VITE_VAPID_PUBLIC` override that — the
+configuration. `EXPO_PUBLIC_RELAY_URL` and `EXPO_PUBLIC_VAPID_PUBLIC` override that — the
 local harness build does. Dev and test builds without the variables run without a
 relay (polling is the backstop).
 
@@ -232,7 +236,7 @@ self-test silently.
 After a denial no browser shows the prompt again, so "Check again" re-reads
 the permission and subscription state instead of re-prompting; the wording is
 generic ("allow notifications in your browser or system settings") plus one help
-URL. The state is re-checked on `visibilitychange` and after every sync, so the
+URL. The state is re-checked when the app returns to the foreground and after every sync, so the
 bar clears itself once the user unblocks notifications.
 
 "Check notifications" runs the relay's self-test (§5.3.1): one test delivery per
@@ -262,7 +266,7 @@ The full live path (a real browser push subscription and a real notification)
 was also run with `relay/cmd/relay-harness`: it serves a resealed copy of
 `../keryx-demo` over local HTTPS, exposes `/test/info` + `/test/publish`, and
 the browser's service worker verified the relay's wake-up and showed the notice.
-Build the app with `VITE_RELAY_URL` and `VITE_VAPID_PUBLIC` to repeat it.
+Build the app with `EXPO_PUBLIC_RELAY_URL` and `EXPO_PUBLIC_VAPID_PUBLIC` to repeat it.
 
 ## Architecture
 
@@ -282,14 +286,19 @@ src/lib/            protocol core (framework-free, unit-tested)
   sync.ts           sync engine (metadata chain → channel roles → hash-pinned
                     items → private feeds → verify → store)
   pair.ts           pairing flow (TOFU + consent summary + subscribe)
-  store.ts          IndexedDB (companies, verified items, media) + prefs
+  store.ts          companies, verified items, media + prefs over db.ts
+  db.ts             key-value store: IndexedDB (web) / db.native.ts SQLite
+  platform.ts       platform, debug flag, external links (+ .native.ts)
+  native-push.ts    bridge to modules/keryx-push (+ .native.ts)
+  richtext.ts       content_html → allowlisted render model
   media.ts          image loading with image/attachment/logo hash checks
   format.ts         date/domain helpers + local filtering (language + tags)
-  scan.ts           QR scan: Capacitor MLKit (native) / BarcodeDetector or
-                    jsQR (web)
+  scan.ts           web QR scan: BarcodeDetector or jsQR (the apps use
+                    expo-camera, ui/QrScanner.tsx)
 src/state.tsx       app state + sync orchestration
 src/ui/             screens: AddCompany (input → confirm → consent), Contacts,
-                    Company (full-article feed + settings sheet), SanitizedHtml
+                    Company (full-article feed + settings sheet), RichText,
+                    kit.tsx (UI primitives) + theme.ts (tokens)
 src/lib/protocol.test.ts  tests against the real ../demo artifacts
 src/lib/relay.ts       relay protocol: topic/scope derivation, wake-up parse +
                        Ed25519 threshold verification, registration client
@@ -321,14 +330,21 @@ that the app consumes SDK-generated content.
 
 ## Native
 
-- `android/`, `ios/` are generated by Capacitor (`npx cap add android|ios`)
-  and wrapped by `npm run cap:sync` after each web build.
-- QR scanning: `@capacitor-mlkit/barcode-scanning` (native, on-device model —
-  no Play Services dependency) with BarcodeDetector/jsQR fallback (web).
-  Camera permission is declared in `AndroidManifest.xml` and
-  `ios/App/App/Info.plist`.
-- Build the APK: `npm run cap:android` (requires Android SDK; the iOS build
-  requires macOS + Xcode).
+- `android/`, `ios/` are generated (`npx expo prebuild`) and never committed:
+  configure them through `app.config.ts` and `plugins/with-keryx-android.js`
+  (release signing from the CI keystore env vars, network security config).
+- `modules/keryx-push` is the local Expo module behind every native wake-up:
+  FCM topics (Android + iOS), the UnifiedPush connector (Android), the native
+  §4 envelope gate against the mirror pushed by `verify-state.ts`, the payload
+  queue, the relay ack and the generic notice — it works while the app is
+  killed. The JS contract is `modules/keryx-push/src/KeryxPushModule.ts`.
+- iOS wake-ups need `GoogleService-Info.plist` (the Firebase iOS app) in `app/`
+  and an APNs-capable signing team; without the plist the app builds and runs
+  with no wake-up transport (polling is the backstop).
+- QR scanning: expo-camera with its on-device detector (no Google services
+  needed); the web uses BarcodeDetector or jsQR.
+- Build the APK: `make apk` (Android SDK); the iOS build needs macOS + Xcode
+  (`npm run ios`).
 
 ## Design
 

@@ -1,28 +1,12 @@
 /**
- * QR scanning: native (Capacitor MLKit) on Android/iOS, `BarcodeDetector`
- * or jsQR on the web. Returns the decoded text (a join URL) or null.
+ * Web QR scanning: `BarcodeDetector` or jsQR against a camera preview.
+ * Returns the decoded text (a join URL) or null. The apps scan with
+ * expo-camera instead (ui/QrScanner.tsx).
  */
 
-import { Capacitor } from '@capacitor/core';
 import jsQR from 'jsqr';
 
 export async function scanQr(preview?: HTMLVideoElement, signal?: AbortSignal): Promise<string | null> {
-  if (Capacitor.isNativePlatform()) {
-    try {
-      const { BarcodeScanner } = await import('@capacitor-mlkit/barcode-scanning');
-      const { BarcodeFormat } = await import('@capacitor-mlkit/barcode-scanning');
-      const { barcodes } = await BarcodeScanner.scan({
-        formats: [BarcodeFormat.QrCode],
-      });
-      return barcodes?.[0]?.rawValue ?? null;
-    } catch {
-      return null;
-    }
-  }
-  return scanWeb(preview, signal);
-}
-
-async function scanWeb(preview?: HTMLVideoElement, signal?: AbortSignal): Promise<string | null> {
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: 'environment' },
   });

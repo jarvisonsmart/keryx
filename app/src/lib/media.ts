@@ -1,14 +1,13 @@
 /**
  * Media loading with integrity checks: `image_sha256` / `attachments[].sha256`
  * (spec/feeds.md §1.1) and `custom.logo_sha256` (spec/repository.md §2).
- * Bytes are cached in IndexedDB; a mismatch makes the resource unavailable
+ * Bytes are cached in the local store; a mismatch makes the resource unavailable
  * (placeholder) — the item itself stays valid.
  */
 
 import { getMedia, putMedia } from './store';
 import { sha256Hex } from './bytes';
-
-const objectUrlCache = new Map<string, string>();
+import { mediaUri } from './media-uri';
 
 /**
  * A linked logo REQUIRES `logo_sha256` (spec/repository.md §2): without it the
@@ -70,17 +69,9 @@ function mimeOf(url: string, contentType: string | null): string {
   }
 }
 
-function objectUrlFor(url: string, bytes: ArrayBuffer, mime: string): string {
-  let existing = objectUrlCache.get(url);
-  if (existing) return existing;
-  existing = URL.createObjectURL(new Blob([bytes], { type: mime || 'image/*' }));
-  objectUrlCache.set(url, existing);
-  return existing;
-}
-
 /**
- * Load an image URL, optionally verifying its SHA-256. Returns an object URL
- * for rendering, or null when the resource is unavailable (fetch error or
+ * Load an image URL, optionally verifying its SHA-256. Returns a local URI
+ * for rendering (media-uri.ts), or null when the resource is unavailable (fetch error or
  * hash mismatch — never rendered).
  */
 export async function loadImage(url: string, origin: string, expectedSha?: unknown): Promise<string | null> {
@@ -90,7 +81,7 @@ export async function loadImage(url: string, origin: string, expectedSha?: unkno
   const cached = await getMedia(url);
   if (cached) {
     if (want && sha256Hex(new Uint8Array(cached.bytes)) !== want) return null;
-    return objectUrlFor(url, cached.bytes, cached.mime);
+    return mediaUri(url, cached.bytes, cached.mime);
   }
   let res: Response;
   try {
@@ -103,5 +94,5 @@ export async function loadImage(url: string, origin: string, expectedSha?: unkno
   if (want && sha256Hex(new Uint8Array(bytes)) !== want) return null;
   const mime = mimeOf(url, res.headers.get('content-type'));
   await putMedia({ url, origin, bytes, mime, at: Date.now() });
-  return objectUrlFor(url, bytes, mime);
+  return mediaUri(url, bytes, mime);
 }
