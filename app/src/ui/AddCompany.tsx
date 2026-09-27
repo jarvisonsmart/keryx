@@ -486,7 +486,8 @@ function NotificationsScreen({
           onPress={async () => {
             setPhase('busy');
             const result = await onEnable();
-            if (result.endpoint === 'delivered') onDone();
+            const granted = appPlatform() === 'web' ? permissionState() === 'granted' : await nativeNotificationGranted();
+            if (result.endpoint === 'delivered' || !granted) onDone();
             else setPhase(result.endpoint === 'pending' ? 'pending' : 'failed');
           }}
         />

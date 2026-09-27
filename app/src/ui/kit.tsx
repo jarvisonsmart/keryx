@@ -43,6 +43,8 @@ export function Screen({
     <View style={{ flex: 1, backgroundColor: c.bg }}>
       {header}
       <ScrollView
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
         contentContainerStyle={{
           flexGrow: 1,
           paddingTop: header ? 0 : insets.top + top,
