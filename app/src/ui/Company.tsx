@@ -12,8 +12,9 @@ import { ArrowClockwise, ArrowLeft, GearSix, LockSimple, Plus, ShieldWarning, Tr
 import type { ChannelState, CompanyRecord, StoredItem } from '../lib/store';
 import { formatDate, formatDateTime, matchesFilter } from '../lib/format';
 import { useVerifiedImage } from './useVerifiedImage';
-import { attachmentSha, bytesMatchSha, type FeedItem } from '../lib/item';
-import { appPlatform, openExternal } from '../lib/platform';
+import type { FeedItem } from '../lib/item';
+import { openAttachment } from '../lib/attachment';
+import { appPlatform } from '../lib/platform';
 import { CompanyLogo } from './CompanyLogo';
 import { LinkConfirm, RichText } from './RichText';
 import { NotificationBanner } from './NotificationBanner';
@@ -21,28 +22,6 @@ import { BuildStamp } from './BuildStamp';
 import { Alert, AppBar, Button, Chip, Divider, IconButton, Row, Screen, Sheet, Stack, Toggle, Txt, VerifiedImage } from './kit';
 import { MAX_WIDTH, mono, radius, useColors } from './theme';
 import { useApp } from '../state';
-
-/**
- * Open an attachment after verifying its `sha256` when present
- * (spec/feeds.md §1.1: verify before rendering, opening, or saving;
- * a mismatch makes the resource unavailable). Unhashed attachments are
- * ordinary web links, mutable by design.
- */
-async function openAttachment(url: string, item: FeedItem) {
-  const sha = attachmentSha(item, url);
-  if (sha === null) return; // malformed pin — never opened
-  if (sha) {
-    let ok = false;
-    try {
-      const res = await fetch(url);
-      if (res.ok) ok = bytesMatchSha(new Uint8Array(await res.arrayBuffer()), sha);
-    } catch {
-      ok = false;
-    }
-    if (!ok) return; // resource unavailable — never opened
-  }
-  await openExternal(url);
-}
 
 /** Ask before a destructive action (the web has no native alert). */
 function confirmRemove(origin: string, onConfirm: () => void) {
