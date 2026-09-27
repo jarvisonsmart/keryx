@@ -5,10 +5,10 @@
  * pins its bytes (spec/feeds.md §1.1/§1.4). Inline data URLs are covered by
  * the item hash.
  */
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { Text, View, type TextStyle } from 'react-native';
 import { domainOf } from '../lib/format';
-import { loadImage } from '../lib/media';
+import { useVerifiedImage } from './useVerifiedImage';
 import { parseRichHtml, type Block, type Mark, type Span } from '../lib/richtext';
 import type { FeedItem } from '../lib/item';
 import { Button, Sheet, Stack, Txt, VerifiedImage } from './kit';
@@ -158,21 +158,9 @@ function renderBlock(block: Block, key: number, ctx: Context): ReactNode {
 }
 
 function ContentImage({ src, alt, ctx }: { src: string; alt: string; ctx: Context }) {
-  const inline = src.startsWith('data:');
-  const [uri, setUri] = useState<string | null>(inline ? src : null);
   const { origin, item, loadRemoteMedia } = ctx;
-
-  useEffect(() => {
-    if (inline || !loadRemoteMedia) return;
-    let alive = true;
-    const want = item.attachments?.find((a) => a.url === src)?.sha256;
-    void loadImage(src, origin, want).then((loaded) => {
-      if (alive) setUri(loaded); // null: resource unavailable — item unaffected
-    });
-    return () => {
-      alive = false;
-    };
-  }, [src, inline, origin, item, loadRemoteMedia]);
+  const want = item.attachments?.find((a) => a.url === src)?.sha256;
+  const uri = useVerifiedImage(src, origin, want, src.startsWith('data:') || loadRemoteMedia);
 
   if (!uri) return null;
   return <VerifiedImage uri={uri} label={alt} style={{ borderRadius: 12, overflow: 'hidden' }} />;

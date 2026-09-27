@@ -11,7 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowClockwise, ArrowLeft, GearSix, LockSimple, Plus, ShieldWarning, Trash } from './icons';
 import type { ChannelState, CompanyRecord, StoredItem } from '../lib/store';
 import { formatDate, formatDateTime, matchesFilter } from '../lib/format';
-import { loadImage } from '../lib/media';
+import { useVerifiedImage } from './useVerifiedImage';
 import { attachmentSha, bytesMatchSha, type FeedItem } from '../lib/item';
 import { appPlatform, openExternal } from '../lib/platform';
 import { CompanyLogo } from './CompanyLogo';
@@ -286,22 +286,11 @@ function FeedArticle({
   onLinkTap: (url: string) => void;
 }) {
   const c = useColors();
-  const [img, setImg] = useState<string | null>(null);
   const [showTime, setShowTime] = useState(false);
   const item = stored.item;
 
-  useEffect(() => {
-    let alive = true;
-    const url = item.image;
-    if (!url) return;
-    // a linked image is hash-pinned by image_sha256 (spec/feeds.md §1.1)
-    void loadImage(url, stored.origin, item.image_sha256).then((uri) => {
-      if (alive) setImg(uri);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [item.image, item.image_sha256, stored.origin]);
+  const img = useVerifiedImage(item.image, stored.origin, item.image_sha256,
+    !!item.image?.startsWith('data:') || company.prefs.loadRemoteMedia);
 
   const published = item.date_published ?? '';
   const date = published ? formatDate(published) : '';
