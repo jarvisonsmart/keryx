@@ -347,6 +347,20 @@ export async function syncCompany(
   const toPut: StoredItem[] = [];
   const toDelete: string[] = [];
 
+  // Current master authorization applies even when a channel index is unreachable.
+  for (const [key, cached] of existing) {
+    if (cached.origin !== updated.origin || cached.isPrivate) continue;
+    try {
+      const authorizing = authorizingKeys(targets, cached.channel);
+      verifyImage(cached.item);
+      verifyItemSignatures(cached.item, authorizing.authors, authorizing.channel);
+    } catch {
+      existing.delete(key);
+      toDelete.push(key);
+      rejected++;
+    }
+  }
+
   // --- 4. public channels: one hash-pinned item file per TUF target ------
   const followed = new Set(updated.channels.filter((c) => c.followed).map((c) => c.name));
   const base = meta.base;
@@ -367,16 +381,7 @@ export async function syncCompany(
       present.add(key);
       const prev = existing.get(key);
       const wantHash = info.hashes?.sha256;
-      if (prev) {
-        try {
-          verifyImage(prev.item);
-          verifyItemSignatures(prev.item, authorizing.authors, authorizing.channel);
-          if (wantHash && prev.hash === wantHash) continue;
-        } catch {
-          existing.delete(key);
-          toDelete.push(key);
-        }
-      }
+      if (prev && wantHash && prev.hash === wantHash) continue;
       // per-item size limit (spec/feeds.md §1.1): reject before fetching, abort beyond it
       if (info.length !== undefined && info.length > PUBLIC_ITEM_MAX_BYTES) {
         rejected++;

@@ -740,6 +740,21 @@ describe('sync failure semantics (spec/core.md §4)', () => {
     expect(cache.has(victim.id)).toBe(false);
   });
 
+  it('rechecks cached signatures when channel role metadata is unavailable', async () => {
+    const { company, fetchTyped } = await setup();
+    const before = await syncCompany(company, fetchTyped, new Map());
+    const cache = new Map(before.toPut.map((item) => [item.id, structuredClone(item)]));
+    const victim = [...cache.values()].find((item) => !item.isPrivate)!;
+    victim.item.title = 'Unverified replacement';
+    const unavailable: typeof fetch = async (input, init) => {
+      if (String(input).includes('channels.')) return new Response('', { status: 503 });
+      return fetchTyped(input, init);
+    };
+    const after = await syncCompany(before.company, unavailable, cache);
+    expect(after.toDelete).toContain(victim.id);
+    expect(cache.has(victim.id)).toBe(false);
+  });
+
   it('a verification failure that is not a chain break does NOT suspend the company', async () => {
     const { company } = await setup();
     // serve a timestamp whose signed bytes no longer verify (a ProtocolError,
