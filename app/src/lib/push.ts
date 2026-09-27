@@ -84,7 +84,10 @@ export async function ensurePushWakeups(companies: CompanyRecord[]): Promise<voi
 
 /** Whether this install's wake-ups are set up for the given company. */
 export async function wakeupsCurrent(company: CompanyRecord): Promise<boolean> {
-  if ((await pushSupport()).fcm) return fcmTopicsSynced(await getAllCompanies());
+  if ((await pushSupport()).fcm) {
+    if ((await ensureFcmTopics(await getAllCompanies())) === undefined) return false;
+    return fcmTopicsSynced(await getAllCompanies());
+  }
   if (appPlatform() === 'ios') return false;
   const base = relayBaseUrl();
   if (!base) return false;

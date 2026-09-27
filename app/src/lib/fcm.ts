@@ -27,7 +27,7 @@ function union(companies: CompanyRecord[]): string[] {
  */
 export async function ensureFcmTopics(companies: CompanyRecord[]): Promise<string[] | undefined> {
   try {
-    const { topics } = await KeryxPush.setTopics({ topics: union(companies) });
+    const { topics } = await KeryxPush.setTopics({ topics: await wantedTopics(companies) });
     return topics;
   } catch {
     return undefined;
@@ -36,13 +36,7 @@ export async function ensureFcmTopics(companies: CompanyRecord[]): Promise<strin
 
 /** Whether the native SDK's topic set matches the union. */
 export async function fcmTopicsSynced(companies: CompanyRecord[]): Promise<boolean> {
-  const wanted = union(companies);
-  // A subscribed test topic is expected while its capability is valid: after a
-  // slow delivery the leftover test topic must not turn the state red.
-  const base = relayBaseUrl();
-  const pending = base ? await pendingTest(base) : undefined;
-  if (pending?.topic && Date.now() <= pending.expiresAt) wanted.push(pending.topic);
-  wanted.sort();
+  const wanted = await wantedTopics(companies);
   try {
     const { topics } = await KeryxPush.getTopics();
     const current = [...topics].sort();
@@ -50,6 +44,16 @@ export async function fcmTopicsSynced(companies: CompanyRecord[]): Promise<boole
   } catch {
     return false;
   }
+}
+
+async function wantedTopics(companies: CompanyRecord[]): Promise<string[]> {
+  const wanted = union(companies);
+  // A subscribed test topic is expected while its capability is valid: after a
+  // slow delivery the leftover test topic must not turn the state red.
+  const base = relayBaseUrl();
+  const pending = base ? await pendingTest(base) : undefined;
+  if (pending?.topic && Date.now() <= pending.expiresAt) wanted.push(pending.topic);
+  return wanted.sort();
 }
 
 /**
@@ -102,6 +106,6 @@ export async function runFcmSelfTest(
   }
   // The nonce stays pending until its capability expires, so a late delivery
   // still upgrades the state to green (design/notifications.md); the next
-  // ensureFcmTopics drops the leftover test topic from the native set.
+  // ensureFcmTopics keeps the test topic until its capability expires.
   return { endpoint: 'pending', leg: 'topic' };
 }

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import 'fake-indexeddb/auto';
 import { ensureFcmTopics, fcmTopicsSynced, runFcmSelfTest } from './fcm';
 import { KeryxPush } from './native-push';
+import { wakeupsCurrent } from './push';
 import { fcmTestReady, startFcmTest } from './relay';
 import { unionTopics } from './relay-sw';
 import {
@@ -14,7 +15,9 @@ import {
 } from './store';
 import type { TargetsDoc } from './tuf';
 
+vi.mock('./platform', () => ({ appPlatform: () => 'android', nativeDebugBuild: () => true }));
 vi.mock('./native-push', () => ({
+  nativePushSupport: vi.fn().mockResolvedValue({ fcm: true, unifiedPush: { available: false, distributors: [] } }),
   KeryxPush: { setTopics: vi.fn(), getTopics: vi.fn() },
 }));
 vi.mock('./relay', async (importOriginal) => ({
@@ -66,6 +69,32 @@ describe('FCM topic sync', () => {
     vi.mocked(KeryxPush.setTopics).mockResolvedValue({ topics: ['a', 'b'] });
     expect(await ensureFcmTopics([a, b])).toEqual(['a', 'b']);
     expect(vi.mocked(KeryxPush.setTopics).mock.calls[0]![0].topics).toEqual(unionOf(a, b));
+  });
+
+  it('updates the topic union before checking a newly added company', async () => {
+    const first = company('https://first.example');
+    const second = company('https://second.example');
+    await putCompany(first);
+    await putCompany(second);
+    let applied = unionOf(first);
+    vi.mocked(KeryxPush.getTopics).mockImplementation(async () => ({ topics: applied }));
+    vi.mocked(KeryxPush.setTopics).mockImplementation(async ({ topics }) => {
+      applied = topics;
+      return { topics };
+    });
+    try {
+      expect(await wakeupsCurrent(second)).toBe(true);
+      expect(applied).toEqual(unionOf(first, second));
+      await putPendingTest({ baseUrl: 'https://relay.example', nonce: 'pending', topic: 'test-topic', expiresAt: Date.now() + 60_000 });
+      expect(await wakeupsCurrent(second)).toBe(true);
+      expect(applied).toEqual([...unionOf(first, second), 'test-topic'].sort());
+      vi.mocked(KeryxPush.setTopics).mockRejectedValue(new Error('subscription failed'));
+      expect(await wakeupsCurrent(second)).toBe(false);
+    } finally {
+      await deleteCompany(first.origin);
+      await deleteCompany(second.origin);
+      await clearPendingTest('https://relay.example');
+    }
   });
 
   it('reports the sync failed when the SDK rejects the subscription', async () => {
