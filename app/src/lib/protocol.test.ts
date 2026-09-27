@@ -725,6 +725,21 @@ describe('sync failure semantics (spec/core.md §4)', () => {
     expect(result.company.lastSyncAt).toBe(company.lastSyncAt);
   });
 
+  it('rechecks cached public signatures even when the index hash is unchanged', async () => {
+    const { company, fetchTyped } = await setup();
+    const before = await syncCompany(company, fetchTyped, new Map());
+    const cache = new Map(before.toPut.map((item) => [item.id, structuredClone(item)]));
+    const victim = [...cache.values()].find((item) => !item.isPrivate)!;
+    victim.item.title = 'Unverified replacement';
+    const unavailable: typeof fetch = async (input, init) => {
+      if (String(input).includes('/channels/')) throw new Error('content offline');
+      return fetchTyped(input, init);
+    };
+    const after = await syncCompany(before.company, unavailable, cache);
+    expect(after.toDelete).toContain(victim.id);
+    expect(cache.has(victim.id)).toBe(false);
+  });
+
   it('a verification failure that is not a chain break does NOT suspend the company', async () => {
     const { company } = await setup();
     // serve a timestamp whose signed bytes no longer verify (a ProtocolError,

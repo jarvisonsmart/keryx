@@ -367,10 +367,21 @@ export async function syncCompany(
       present.add(key);
       const prev = existing.get(key);
       const wantHash = info.hashes?.sha256;
-      if (prev && wantHash && prev.hash === wantHash) continue; // unchanged, already verified
+      if (prev) {
+        try {
+          verifyImage(prev.item);
+          verifyItemSignatures(prev.item, authorizing.authors, authorizing.channel);
+          if (wantHash && prev.hash === wantHash) continue;
+        } catch {
+          existing.delete(key);
+          toDelete.push(key);
+        }
+      }
       // per-item size limit (spec/feeds.md §1.1): reject before fetching, abort beyond it
       if (info.length !== undefined && info.length > PUBLIC_ITEM_MAX_BYTES) {
         rejected++;
+        existing.delete(key);
+        if (prev && !toDelete.includes(key)) toDelete.push(key);
         errors.push(`channel ${channel}: item ${path} is ${info.length} bytes, over the ${PUBLIC_ITEM_MAX_BYTES}-byte limit`);
         continue;
       }
@@ -392,10 +403,14 @@ export async function syncCompany(
         const stored = toStored(updated, channel, '', false, item, wantHash, prev);
         if (!prev) newItems++;
         existing.set(key, stored);
+        const dropped = toDelete.indexOf(key);
+        if (dropped !== -1) toDelete.splice(dropped, 1);
         toPut.push(stored);
       } catch (err) {
         if (err instanceof ProtocolError) {
           rejected++;
+          existing.delete(key);
+          if (prev && !toDelete.includes(key)) toDelete.push(key);
           errors.push(`channel ${channel}: ${err.message}`);
         } else {
           errors.push(`channel ${channel}: ${err instanceof Error ? err.message : String(err)}`);
