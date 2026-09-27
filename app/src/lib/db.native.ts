@@ -68,6 +68,19 @@ async function put(db: SQLite.SQLiteDatabase, store: StoreName, value: object): 
   );
 }
 
+let writes: Promise<unknown> = Promise.resolve();
+
+function write<T>(action: (txn: SQLite.SQLiteDatabase) => Promise<T>): Promise<T> {
+  const result = writes.then(async () => {
+    const db = await sqlite();
+    let value!: T;
+    await db.withExclusiveTransactionAsync(async (txn) => { value = await action(txn); });
+    return value;
+  });
+  writes = result.catch(() => undefined);
+  return result;
+}
+
 export function openAppDb(): KeyValueDb {
   return {
     async get(store, key) {
@@ -82,32 +95,27 @@ export function openAppDb(): KeyValueDb {
       const rows = await (await sqlite()).getAllAsync<Row>(`SELECT value FROM ${store} WHERE origin = ? ORDER BY key`, origin);
       return rows.map((r) => decode(store, r.value));
     },
-    async putMany(store, values) {
-      const db = await sqlite();
-      await db.withExclusiveTransactionAsync(async (txn) => {
+    putMany(store, values) {
+      return write(async (txn) => {
         for (const value of values) await put(txn, store, value);
       });
     },
-    async deleteMany(store, keys) {
-      const db = await sqlite();
-      await db.withExclusiveTransactionAsync(async (txn) => {
+    deleteMany(store, keys) {
+      return write(async (txn) => {
         for (const key of keys) await txn.runAsync(`DELETE FROM ${store} WHERE key = ?`, storageKey(key));
       });
     },
-    async deleteByOrigin(store, origin) {
-      await (await sqlite()).runAsync(`DELETE FROM ${store} WHERE origin = ?`, origin);
+    deleteByOrigin(store, origin) {
+      return write(async (txn) => { await txn.runAsync(`DELETE FROM ${store} WHERE origin = ?`, origin); });
     },
-    async update(store, key, next) {
-      let wrote = false;
-      const db = await sqlite();
-      await db.withExclusiveTransactionAsync(async (txn) => {
+    update(store, key, next) {
+      return write(async (txn) => {
         const row = await txn.getFirstAsync<Row>(`SELECT value FROM ${store} WHERE key = ?`, storageKey(key));
         const value = next(row ? decode(store, row.value) : undefined);
-        if (value === undefined) return;
+        if (value === undefined) return false;
         await put(txn, store, value);
-        wrote = true;
+        return true;
       });
-      return wrote;
     },
   };
 }

@@ -6,12 +6,17 @@ vi.mock('expo-sqlite', () => ({
     const db = new DatabaseSync(':memory:');
     // The iOS bridge binds strings with length -1, ending at the first NUL.
     const args = (values: SQLInputValue[]) => values.map((v) => typeof v === 'string' ? v.split('\0')[0] : v);
+    let writing = false;
     const adapter = {
       async execAsync(sql: string) { db.exec(sql); },
       async runAsync(sql: string, ...values: SQLInputValue[]) { return db.prepare(sql).run(...args(values)); },
       async getFirstAsync(sql: string, ...values: SQLInputValue[]) { return db.prepare(sql).get(...args(values)); },
       async getAllAsync(sql: string, ...values: SQLInputValue[]) { return db.prepare(sql).all(...args(values)); },
-      async withExclusiveTransactionAsync(fn: (txn: unknown) => Promise<void>) { await fn(adapter); },
+      async withExclusiveTransactionAsync(fn: (txn: unknown) => Promise<void>) {
+        if (writing) throw new Error('database is locked');
+        writing = true;
+        try { await fn(adapter); } finally { writing = false; }
+      },
     };
     return adapter;
   },
@@ -34,6 +39,14 @@ describe('SQLite persistence', () => {
     const records = [{ key: 'seq\0a', value: 7 }, { key: 'seq\0b', value: 9 }];
     await db.putMany('relay', records);
     expect(await db.get('relay', records[0].key)).toEqual(records[0]);
+  });
+
+  it('serializes simultaneous writes and replay updates', async () => {
+    const db = openAppDb();
+    await Promise.all(Array.from({ length: 8 }, (_, i) => db.putMany('relay', [{ key: `parallel-${i}`, seq: i }])));
+    await Promise.all(Array.from({ length: 8 }, () => db.update<{ key: string; seq: number }>('relay', 'parallel-0',
+      (row) => row && { ...row, seq: row.seq + 1 })));
+    expect(await db.get('relay', 'parallel-0')).toEqual({ key: 'parallel-0', seq: 8 });
   });
 
   it('round trips media bytes without interpreting publisher JSON as a byte marker', async () => {
