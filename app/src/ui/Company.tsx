@@ -132,6 +132,7 @@ export function CompanyView({
         <Stack style={{ marginTop: 16 }}>
           <Button label="Scan a new QR code" onPress={() => onRepair(company.origin)} />
           <Button kind="danger" label="Remove company" icon={<Trash size={20} color={c.danger} />} onPress={() => void actions.removeCompany(company.origin)} />
+          {companies.length > 1 && <Button kind="ghost" label="Back" onPress={onBack} />}
         </Stack>
       </Screen>
     );
