@@ -14,14 +14,16 @@ function encode(value: object): string {
   );
 }
 
-function decode<T>(json: string): T {
-  return JSON.parse(json, (_key, v: unknown) => {
-    if (v && typeof v === 'object' && BYTES in v) {
-      return base64urlToBytes((v as Record<string, string>)[BYTES]).slice().buffer;
-    }
-    return v;
-  }) as T;
+function decode<T>(store: StoreName, json: string): T {
+  const value = JSON.parse(json);
+  if (store === 'media' && value.bytes?.[BYTES]) {
+    value.bytes = base64urlToBytes(value.bytes[BYTES]).slice().buffer;
+  }
+  return value as T;
 }
+
+// Expo's iOS SQLite binding uses NUL-terminated strings; compound keys contain NULs.
+const storageKey = (key: string): string => JSON.stringify(key);
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -37,6 +39,17 @@ function sqlite(): Promise<SQLite.SQLiteDatabase> {
         )
         .join(''),
     );
+    const version = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
+    if (!version?.user_version) {
+      await db.withExclusiveTransactionAsync(async (txn) => {
+        for (const store of Object.keys(KEY_PATHS) as StoreName[]) {
+          const rows = await txn.getAllAsync<Row>(`SELECT value FROM ${store}`);
+          await txn.runAsync(`DELETE FROM ${store}`);
+          for (const row of rows) await put(txn, store, decode(store, row.value));
+        }
+        await txn.execAsync('PRAGMA user_version = 1');
+      });
+    }
     return db;
   })();
   return dbPromise;
@@ -49,7 +62,7 @@ async function put(db: SQLite.SQLiteDatabase, store: StoreName, value: object): 
   const origin = typeof record.origin === 'string' ? record.origin : null;
   await db.runAsync(
     `INSERT OR REPLACE INTO ${store} (key, origin, value) VALUES (?, ?, ?)`,
-    String(record[KEY_PATHS[store]]),
+    storageKey(String(record[KEY_PATHS[store]])),
     origin,
     encode(value),
   );
@@ -58,16 +71,16 @@ async function put(db: SQLite.SQLiteDatabase, store: StoreName, value: object): 
 export function openAppDb(): KeyValueDb {
   return {
     async get(store, key) {
-      const row = await (await sqlite()).getFirstAsync<Row>(`SELECT value FROM ${store} WHERE key = ?`, key);
-      return row ? decode(row.value) : undefined;
+      const row = await (await sqlite()).getFirstAsync<Row>(`SELECT value FROM ${store} WHERE key = ?`, storageKey(key));
+      return row ? decode(store, row.value) : undefined;
     },
     async getAll(store) {
       const rows = await (await sqlite()).getAllAsync<Row>(`SELECT value FROM ${store} ORDER BY key`);
-      return rows.map((r) => decode(r.value));
+      return rows.map((r) => decode(store, r.value));
     },
     async getAllByOrigin(store, origin) {
       const rows = await (await sqlite()).getAllAsync<Row>(`SELECT value FROM ${store} WHERE origin = ? ORDER BY key`, origin);
-      return rows.map((r) => decode(r.value));
+      return rows.map((r) => decode(store, r.value));
     },
     async putMany(store, values) {
       const db = await sqlite();
@@ -78,7 +91,7 @@ export function openAppDb(): KeyValueDb {
     async deleteMany(store, keys) {
       const db = await sqlite();
       await db.withExclusiveTransactionAsync(async (txn) => {
-        for (const key of keys) await txn.runAsync(`DELETE FROM ${store} WHERE key = ?`, key);
+        for (const key of keys) await txn.runAsync(`DELETE FROM ${store} WHERE key = ?`, storageKey(key));
       });
     },
     async deleteByOrigin(store, origin) {
@@ -88,8 +101,8 @@ export function openAppDb(): KeyValueDb {
       let wrote = false;
       const db = await sqlite();
       await db.withExclusiveTransactionAsync(async (txn) => {
-        const row = await txn.getFirstAsync<Row>(`SELECT value FROM ${store} WHERE key = ?`, key);
-        const value = next(row ? decode(row.value) : undefined);
+        const row = await txn.getFirstAsync<Row>(`SELECT value FROM ${store} WHERE key = ?`, storageKey(key));
+        const value = next(row ? decode(store, row.value) : undefined);
         if (value === undefined) return;
         await put(txn, store, value);
         wrote = true;
