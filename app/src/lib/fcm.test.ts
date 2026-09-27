@@ -4,7 +4,14 @@ import { ensureFcmTopics, fcmTopicsSynced, runFcmSelfTest } from './fcm';
 import { KeryxPush } from './native-push';
 import { fcmTestReady, startFcmTest } from './relay';
 import { unionTopics } from './relay-sw';
-import { clearPendingTest, pendingTest, putPendingTest, type CompanyRecord } from './store';
+import {
+  clearPendingTest,
+  deleteCompany,
+  pendingTest,
+  putCompany,
+  putPendingTest,
+  type CompanyRecord,
+} from './store';
 import type { TargetsDoc } from './tuf';
 
 vi.mock('./native-push', () => ({
@@ -104,6 +111,32 @@ describe('FCM topic-leg self-test', () => {
     const result = await runFcmSelfTest([company('http://a.example/x')], 100);
     expect(result.endpoint).toBe('delivered');
     expect(result.leg).toBe('topic');
+  });
+
+  it('restores the union the store follows now, not the one captured at test start', async () => {
+    const before = company('http://before.example/x');
+    const after = company('http://after.example/y');
+    await putCompany(after);
+    vi.mocked(startFcmTest).mockResolvedValue({
+      testId: 'id',
+      topic: 'test-topic',
+      nonce: 'n',
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    vi.mocked(KeryxPush.setTopics).mockResolvedValue({ topics: [] });
+    vi.mocked(fcmTestReady).mockImplementation(async () => {
+      const pending = await pendingTest('https://relay.example');
+      await putPendingTest({ ...pending!, receivedAt: Date.now() });
+    });
+    try {
+      const result = await runFcmSelfTest([before], 100);
+      expect(result.endpoint).toBe('delivered');
+      // a channel toggled while the test was in flight must survive its cleanup
+      const last = vi.mocked(KeryxPush.setTopics).mock.calls.at(-1)![0].topics;
+      expect(last).toEqual(unionOf(after));
+    } finally {
+      await deleteCompany(after.origin);
+    }
   });
 
   it('reports failed when the relay cannot publish', async () => {

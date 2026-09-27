@@ -6,7 +6,7 @@
  * topic set and runs the §5.3.1 topic-leg self-test.
  */
 import { KeryxPush } from './native-push';
-import { clearPendingTest, pendingTest, putPendingTest } from './store';
+import { clearPendingTest, getAllCompanies, pendingTest, putPendingTest } from './store';
 import type { CompanyRecord } from './store';
 import { fcmTestReady, relayBaseUrl, startFcmTest } from './relay';
 import { unionTopics } from './relay-sw';
@@ -81,7 +81,9 @@ export async function runFcmSelfTest(
     });
     await fcmTestReady(base, test.testId);
   } catch {
-    await KeryxPush.setTopics({ topics }).catch(() => undefined);
+    // Restore the topic set the store follows right now: a channel toggle made
+    // while the test was in flight must not be reverted by the cleanup.
+    await KeryxPush.setTopics({ topics: union(await getAllCompanies()) }).catch(() => undefined);
     await clearPendingTest(base);
     return { endpoint: 'failed', leg: 'topic' };
   }
@@ -90,7 +92,10 @@ export async function runFcmSelfTest(
     const pending = await pendingTest(base);
     if (pending?.receivedAt) {
       await clearPendingTest(base);
-      await KeryxPush.setTopics({ topics }).catch(() => undefined);
+      // The test topic is dropped against the store's current union, not the
+      // union captured when the test started: a channel toggled during the test
+      // must survive the cleanup.
+      await KeryxPush.setTopics({ topics: union(await getAllCompanies()) }).catch(() => undefined);
       return { endpoint: 'delivered', testedAt: pending.receivedAt, leg: 'topic' };
     }
     await new Promise((resolve) => setTimeout(resolve, 250));

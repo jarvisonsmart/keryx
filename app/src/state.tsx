@@ -297,8 +297,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         void processNativePayload(payload);
       });
       await drainNativeMessages();
-      await ensurePushWakeups(await getAllCompanies());
+      // the mirror must match the store before the transport work below, which
+      // can hang or fail
       await pushVerifyState();
+      await ensurePushWakeups(await getAllCompanies());
       await catchUpOnWakeups();
     })();
     return () => {
@@ -359,10 +361,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
           c.name === channel ? { ...c, followed, isNew: false } : c,
         );
         await putCompany({ ...company, channels });
-        // keep the relay registration's followed-topic union in step (§5.3)
-        await ensurePushWakeups(await getAllCompanies());
+        // The native verify mirror is the notice gate and must never lag the
+        // store: it is pushed before the transport work below, which can hang or
+        // fail, so a wake-up for a just-unfollowed channel is already dropped.
         await pushVerifyState();
         setCompanies(await getAllCompanies());
+        // keep the relay registration's followed-topic union in step (§5.3)
+        await ensurePushWakeups(await getAllCompanies());
       },
       async enableNotifications() {
         if (Capacitor.getPlatform() === 'android') {
@@ -436,9 +441,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         await deleteCompany(origin);
         itemsRef.current = itemsRef.current.filter((i) => i.origin !== origin);
         setCompanies(await getAllCompanies());
+        // the mirror must drop the removed company's topics before the transport
+        // work below, which can hang or fail
+        await pushVerifyState();
         // drop the relay registration when no followed topic remains (§5.3)
         await ensurePushWakeups(await getAllCompanies());
-        await pushVerifyState();
       },
       async saveCompany(company, newItems) {
         await putCompany(company);

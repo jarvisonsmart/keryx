@@ -186,7 +186,6 @@ public class KeryxPushPlugin extends Plugin {
     @PluginMethod
     public void setTopics(PluginCall call) {
         final Context context = getContext();
-        final Set<String> current = subscribedTopics(context);
         final Set<String> wanted = new HashSet<>();
         JSArray topics = call.getArray("topics");
         if (topics != null) {
@@ -195,18 +194,31 @@ public class KeryxPushPlugin extends Plugin {
                 if (topic != null && !topic.isEmpty()) wanted.add(topic);
             }
         }
-        final List<String> added = KeryxTopics.added(current, wanted);
-        final List<String> removed = KeryxTopics.removed(current, wanted);
         io.execute(() -> {
+            // The diff is computed inside the executor, which serializes the
+            // whole read-diff-apply-write cycle: a diff computed by a caller
+            // that raced an earlier setTopics can never be applied to the newer
+            // SDK state. The applied set is persisted after every operation, so
+            // a failed cycle leaves the mirror at what the SDK really follows.
+            final Set<String> applied = subscribedTopics(context);
+            final List<String> added = KeryxTopics.added(applied, wanted);
+            final List<String> removed = KeryxTopics.removed(applied, wanted);
             try {
                 FirebaseMessaging messaging = FirebaseMessaging.getInstance();
-                for (String topic : added) Tasks.await(messaging.subscribeToTopic(topic));
-                for (String topic : removed) Tasks.await(messaging.unsubscribeFromTopic(topic));
+                for (String topic : added) {
+                    Tasks.await(messaging.subscribeToTopic(topic));
+                    applied.add(topic);
+                    putSubscribedTopics(context, applied);
+                }
+                for (String topic : removed) {
+                    Tasks.await(messaging.unsubscribeFromTopic(topic));
+                    applied.remove(topic);
+                    putSubscribedTopics(context, applied);
+                }
             } catch (Exception e) {
                 call.reject("FCM topic subscription failed: " + e.getMessage());
                 return;
             }
-            putSubscribedTopics(context, wanted);
             JSObject ret = new JSObject();
             ret.put("topics", topicsArray(wanted));
             call.resolve(ret);
