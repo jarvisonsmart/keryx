@@ -54,6 +54,7 @@ type config struct {
 	vapidSub     string
 	companyID    string
 	channel      string
+	appOrigin    string
 }
 
 type harness struct {
@@ -88,6 +89,7 @@ func main() {
 	flag.StringVar(&cfg.vapidSub, "vapid-sub", "mailto:ops@example.com", "VAPID sub contact")
 	flag.StringVar(&cfg.companyID, "company", "127.0.0.1", "canonical company_id")
 	flag.StringVar(&cfg.channel, "channel", "security", "channel to publish on")
+	flag.StringVar(&cfg.appOrigin, "app-origin", "http://localhost:4173", "PWA origin allowed by CORS")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -173,7 +175,7 @@ func run(cfg config, logger *slog.Logger) error {
 	h.dispatcher = relay.New(h.store, nil, webpush, relay.Options{Logger: logger})
 	apiSrv := api.New(h.store, h.dispatcher, h.companies, api.Options{
 		Policy:              policy,
-		CORSOrigins:         []string{"http://localhost:4173"},
+		CORSOrigins:         []string{cfg.appOrigin},
 		ApprovedPushOrigins: []string{"https://jmt17.google.com", "https://fcm.googleapis.com"},
 		Logger:              logger,
 	})

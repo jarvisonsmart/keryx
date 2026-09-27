@@ -46,7 +46,7 @@ function buildHarness() {
 function startHarness() {
   fs.writeFileSync(LOG, '');
   const out = fs.openSync(LOG, 'a');
-  harness = spawn(BIN, ['-vapid-private', VAPID.private, '-demo', process.env.KERYX_DEMO_DIR ?? '/tmp/keryx-demo', '-keys', process.env.KERYX_KEYSTORE ?? '/tmp/keryx-demo-keys'], {
+  harness = spawn(BIN, ['-vapid-private', VAPID.private, '-app-origin', new URL(APP).origin, '-demo', process.env.KERYX_DEMO_DIR ?? '/tmp/keryx-demo', '-keys', process.env.KERYX_KEYSTORE ?? '/tmp/keryx-demo-keys'], {
     cwd: RELAY_DIR,
     env: { ...process.env, TMPDIR: RUN_DIR },
     stdio: ['ignore', out, out],
