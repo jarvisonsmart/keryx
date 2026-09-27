@@ -1,4 +1,5 @@
 import ExpoModulesCore
+import UIKit
 
 /// The native wake-up transport for the JS layer (src/KeryxPushModule.ts).
 /// iOS has no UnifiedPush: wake-ups ride FCM topics over APNs only.
@@ -18,13 +19,24 @@ public class KeryxPushModule: Module {
 
     Events("push")
 
+    OnCreate {
+      DispatchQueue.main.async { core.setActive(UIApplication.shared.applicationState == .active) }
+    }
+
+    OnAppBecomesActive { core.setActive(true) }
+
+    OnAppEntersBackground { core.setActive(false) }
+
     Constant("isDebug") { Self.isDebug }
 
     OnStartObserving("push") { core.startListening(self) }
 
     OnStopObserving("push") { core.stopListening(self) }
 
-    OnDestroy { core.stopListening(self) }
+    OnDestroy {
+      core.stopListening(self)
+      core.setActive(false)
+    }
 
     AsyncFunction("getSupport") { () -> [String: Any] in
       ["fcm": core.fcmAvailable, "unifiedPush": ["available": false, "distributors": [String]()]]

@@ -26,6 +26,7 @@ final class KeryxPushCore {
   private let lock = NSLock()
   private let topicQueue = DispatchQueue(label: "cz.v1b3coder.keryx.push.topics")
   private weak var listener: KeryxPushModule?
+  private var active = false
 
   /// Firebase is usable only with the Firebase iOS app's plist; without it
   /// Firebase is never touched.
@@ -45,10 +46,14 @@ final class KeryxPushCore {
     lock.withLock { if listener === module { listener = nil } }
   }
 
-  /// Hands the payload to the page; false when no JS listener is attached.
+  func setActive(_ value: Bool) {
+    lock.withLock { active = value }
+  }
+
+  /// Background JS may be suspended even while its listener remains attached.
   @discardableResult
   private func emit(_ payload: String) -> Bool {
-    guard let listener = lock.withLock({ listener }) else { return false }
+    guard let listener = lock.withLock({ active ? listener : nil }) else { return false }
     listener.sendEvent("push", ["payload": payload])
     return true
   }

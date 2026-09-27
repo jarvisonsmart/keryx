@@ -8,6 +8,8 @@ import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
 import com.google.android.gms.tasks.Tasks
 import com.google.firebase.messaging.FirebaseMessaging
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
 import expo.modules.interfaces.permissions.PermissionsStatus
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.CodedException
@@ -30,6 +32,15 @@ class KeryxPushModule : Module() {
 
     Events("push")
 
+    OnCreate {
+      KeryxPushCore.foreground = (appContext.currentActivity as? LifecycleOwner)
+        ?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) == true
+    }
+
+    OnActivityEntersForeground { KeryxPushCore.foreground = true }
+
+    OnActivityEntersBackground { KeryxPushCore.foreground = false }
+
     Constant("isDebug") {
       (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
     }
@@ -44,6 +55,7 @@ class KeryxPushModule : Module() {
 
     OnDestroy {
       KeryxPushCore.listener = null
+      KeryxPushCore.foreground = false
     }
 
     AsyncFunction("getSupport") {

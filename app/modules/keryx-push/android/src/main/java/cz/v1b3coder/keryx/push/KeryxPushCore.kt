@@ -42,6 +42,9 @@ object KeryxPushCore {
   @Volatile
   var listener: ((String) -> Unit)? = null
 
+  @Volatile
+  var foreground = false
+
   /** Settles the in-flight distributor registration (null error = success). */
   interface RegistrationCallback {
     fun done(error: String?)
@@ -123,7 +126,7 @@ object KeryxPushCore {
    * One wake-up from either leg. No TUF metadata or content work: the envelope
    * is verified against the mirrored state, queued for the page (verified or
    * not, so a stale mirror costs a delayed notice, never a lost wake-up), and —
-   * when accepted — acked once and announced natively unless JS is listening
+   * when accepted — acked once and announced natively unless foreground JS is listening
    * (then the page owns verification, recovery and sync).
    */
   fun onMessage(context: Context, payload: String) {
@@ -139,7 +142,7 @@ object KeryxPushCore {
       accepted
     }
     enqueue(context, payload)
-    val deliver = listener
+    val deliver = listener.takeIf { foreground }
     if (state == null) {
       // queued for the page; never acked or announced natively
       deliver?.invoke(payload)
