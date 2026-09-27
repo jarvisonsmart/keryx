@@ -1,3 +1,4 @@
+import { Text } from './text';
 /**
  * Sandboxed rich content (lib/richtext.ts model): links are intercepted and
  * shown with their real destination domain first; linked media is loaded only
@@ -6,7 +7,7 @@
  * the item hash.
  */
 import { useMemo, type ReactNode } from 'react';
-import { Text, View, type TextStyle } from 'react-native';
+import { View, type TextStyle } from 'react-native';
 import { domainOf } from '../lib/format';
 import { useVerifiedImage } from './useVerifiedImage';
 import { parseRichHtml, type Block, type Mark, type Span } from '../lib/richtext';

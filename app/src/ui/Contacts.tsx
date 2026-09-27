@@ -1,9 +1,10 @@
+import { Text } from './text';
 /**
  * Contacts list (shown only when more than one company is added — with a
  * single company the app opens it directly). Each row: logo, name, the join
  * origin as a persistent secondary line, unread count.
  */
-import { Text, View } from 'react-native';
+import { View } from 'react-native';
 import { Plus } from './icons';
 import type { CompanyRecord, StoredItem } from '../lib/store';
 import type { AppActions } from '../state';

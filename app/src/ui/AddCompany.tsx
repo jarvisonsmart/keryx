@@ -5,7 +5,8 @@
  */
 
 import { useEffect, useState } from 'react';
-import { TextInput, View } from 'react-native';
+import { View } from 'react-native';
+import { TextInput } from './text';
 import { ArrowLeft, ArrowRight, ClipboardText, QrCode } from './icons';
 import { parseJoinUrl, type JoinPayload } from '../lib/payload';
 import { buildPairingOffer, createCompanyFromOffer, type PairingOffer } from '../lib/pair';

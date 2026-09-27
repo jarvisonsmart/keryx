@@ -31,6 +31,12 @@
           background: #101013;
         }
       }
+      html {
+        font-size: 100%;
+      }
+      @supports (font: -apple-system-body) {
+        html { font: -apple-system-body; }
+      }
       body {
         overflow: hidden;
       }

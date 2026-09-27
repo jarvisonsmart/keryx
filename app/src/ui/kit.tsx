@@ -10,13 +10,13 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   View,
   type ImageStyle,
   type StyleProp,
   type TextProps,
   type ViewStyle,
 } from 'react-native';
+import { Text } from './text';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SvgXml } from 'react-native-svg';
 import { MAX_WIDTH, mono, radius, useColors } from './theme';
