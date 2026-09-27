@@ -8,6 +8,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 
 const root = join(import.meta.dirname, '..', 'dist');
+const base = '/' + (process.env.EXPO_BASE_URL ?? '').split('/').filter(Boolean).join('/');
 const port = Number(process.env.PORT ?? 4173);
 const types = {
   '.html': 'text/html; charset=utf-8',
@@ -21,8 +22,13 @@ const types = {
 };
 
 createServer(async (req, res) => {
-  const path = normalize(decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname)).replace(/^(\.\.[/\\])+/, '');
-  for (const file of [join(root, path), join(root, path, 'index.html'), join(root, 'index.html')]) {
+  const pathname = new URL(req.url ?? '/', 'http://x').pathname;
+  if (base !== '/' && !pathname.startsWith(base + '/')) {
+    res.writeHead(302, { Location: base + '/' }).end();
+    return;
+  }
+  const path = normalize(decodeURIComponent(base === '/' ? pathname : pathname.slice(base.length))).replace(/^(\.\.[/\\])+/, '');
+  for (const file of [join(root, path), join(root, path, 'index.html'), ...(!extname(path) ? [join(root, 'index.html')] : [])]) {
     try {
       const body = await readFile(file);
       res.writeHead(200, { 'Content-Type': types[extname(file)] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' });
