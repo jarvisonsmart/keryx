@@ -38,6 +38,11 @@ site is public.
   `vapid_public` must match the PWA's default (`app/src/lib/relay.ts`).
 - `../keryx-demo` → demo site, own repo; regenerate with `make demo`.
 - `../keryx-demo-keys` → maintainer-only release keystore, never commit it.
+- `../keryx-android-keys` → maintainer-only Android signing keystore, never
+  commit it. CI reads it from the `KERYX_KEYSTORE_BASE64`,
+  `KERYX_KEYSTORE_PASSWORD`, `KERYX_KEY_ALIAS` and `KERYX_KEY_PASSWORD`
+  secrets. The signing certificate must never change, or every install can never
+  update again.
 
 ## Publishing
 

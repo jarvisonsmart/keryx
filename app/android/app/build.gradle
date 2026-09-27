@@ -17,10 +17,28 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            // CI (GitHub Actions) provides the release keystore through these
+            // env vars. Every published APK must be signed with this key: an
+            // unchanged signing certificate is what lets users update in place.
+            if (System.getenv("KERYX_KEYSTORE_PATH")) {
+                storeFile file(System.getenv("KERYX_KEYSTORE_PATH"))
+                storePassword System.getenv("KERYX_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("KERYX_KEY_ALIAS")
+                keyPassword System.getenv("KERYX_KEY_PASSWORD")
+                storeType "pkcs12"
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // Without the CI keystore a local release build falls back to the
+            // debug key so it stays installable for testing; the CI refuses to
+            // publish without the release keystore (see the workflow).
+            signingConfig System.getenv("KERYX_KEYSTORE_PATH") ? signingConfigs.release : signingConfigs.debug
         }
     }
 }

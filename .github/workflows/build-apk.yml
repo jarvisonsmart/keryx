@@ -49,14 +49,18 @@ jobs:
             ~/.gradle/wrapper
           key: gradle-${{ runner.os }}-${{ hashFiles('app/android/**/*.gradle', 'app/android/gradle/wrapper/gradle-wrapper.properties', 'app/android/gradle.properties') }}
 
-      # Debug builds are signed with ~/.android/debug.keystore. Caching it makes
-      # every release share one signature, so users can update over previous
-      # CI builds instead of uninstalling first.
-      - name: Cache Android debug keystore
-        uses: actions/cache@v6
-        with:
-          path: ~/.android/debug.keystore
-          key: android-debug-keystore
+      # The release keystore signs every published APK. It lives only in
+      # GitHub secrets (see ../keryx-android-keys); the CI must never publish
+      # a build signed with anything else, or existing installs can never update.
+      - name: Decode the release keystore
+        env:
+          KERYX_KEYSTORE_BASE64: ${{ secrets.KERYX_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KERYX_KEYSTORE_BASE64" ]; then
+            echo "::error::KERYX_KEYSTORE_BASE64 is not set; refusing to publish an unsigned release"
+            exit 1
+          fi
+          echo "$KERYX_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/keryx-release.jks"
 
       - name: Install npm dependencies
         working-directory: app
@@ -77,28 +81,31 @@ jobs:
         run: |
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
             TAG="$GITHUB_REF_NAME"
-            VERSION="${TAG#v}"
-            IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
-            echo "apk_version=$VERSION" >> "$GITHUB_OUTPUT"
-            echo "code=$(( ${MAJOR:-0} * 10000 + ${MINOR:-0} * 100 + ${PATCH:-0} ))" >> "$GITHUB_OUTPUT"
           else
             TAG="${{ inputs.version }}"
-            VERSION="${TAG#v}"
           fi
+          VERSION="${TAG#v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          echo "apk_version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "code=$(( ${MAJOR:-0} * 10000 + ${MINOR:-0} * 100 + ${PATCH:-0} ))" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Build debug APK
+      - name: Build release APK
         working-directory: app/android
         env:
+          KERYX_KEYSTORE_PATH: ${{ runner.temp }}/keryx-release.jks
+          KERYX_KEYSTORE_PASSWORD: ${{ secrets.KERYX_KEYSTORE_PASSWORD }}
+          KERYX_KEY_ALIAS: ${{ secrets.KERYX_KEY_ALIAS }}
+          KERYX_KEY_PASSWORD: ${{ secrets.KERYX_KEY_PASSWORD }}
           KERYX_VERSION_NAME: ${{ steps.version.outputs.apk_version }}
           KERYX_VERSION_CODE: ${{ steps.version.outputs.code }}
-        run: ./gradlew testDebugUnitTest assembleDebug
+        run: ./gradlew testReleaseUnitTest assembleRelease
 
       - name: Stage APK
         run: |
           mkdir -p dist-apk
-          cp app/android/app/build/outputs/apk/debug/app-debug.apk "dist-apk/keryx-${{ steps.version.outputs.version }}-debug.apk"
+          cp app/android/app/build/outputs/apk/release/app-release.apk "dist-apk/keryx-${{ steps.version.outputs.version }}.apk"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
