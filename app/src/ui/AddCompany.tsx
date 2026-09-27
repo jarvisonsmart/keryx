@@ -473,9 +473,11 @@ function NotificationsScreen({
       ) : phase === 'failed' ? (
         <View style={{ marginBottom: 16 }}>
           <Alert danger>
-            {notification.leg === 'topic'
-              ? 'Notifications could not be set up. Try again.'
-              : `Notifications are off. Allow them in ${settings}, then try again.`}
+            {notification.leg === 'registration'
+              ? 'Notifications could not be registered. Try again.'
+              : notification.leg === 'topic'
+                ? 'The test wake-up was not sent. Try again.'
+                : 'The test notification did not arrive. Try again.'}
           </Alert>
         </View>
       ) : null}
