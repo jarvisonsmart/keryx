@@ -103,7 +103,7 @@ demo-verify: $(DEMO_REPO)/join.txt ## Verify the generated demo site
 demo-sdk: ## Generate a minimal artifact from examples/sdk-artifact (SDK consumer)
 	mkdir -p $(BIN)
 	cd $(EXAMPLES_DIR) && $(GO) build -o $(CURDIR)/$(BIN)/keryxdemo ./sdk-artifact
-	$(BIN)/keryxdemo --out $(CURDIR)/$(DEMO_SDK_DIR) --keys $(DEMO_SDK_KEYS_DIR) --base $(DEMO_SDK_BASE)
+	$(BIN)/keryxdemo --out $(abspath $(DEMO_SDK_DIR)) --keys $(DEMO_SDK_KEYS_DIR) --base $(DEMO_SDK_BASE)
 
 serve-demo: ## Serve the demo site with CORS (default port 8000)
 	$(PYTHON) tools/serve.py --port $(DEMO_PORT) $(DEMO_REPO)
@@ -136,7 +136,7 @@ app-test: $(DEMO_REPO)/join.txt $(APP_DEPS_STAMP) ## Run the protocol tests agai
 	cd $(APP_DIR) && KERYX_DEMO_DIR=$(abspath $(DEMO_REPO)) KERYX_KEYSTORE=$(abspath $(DEMO_KEYS_DIR)) $(NPM) test
 
 app-test-sdk: demo-sdk $(APP_DEPS_STAMP) ## Run the protocol tests against an SDK-generated artifact
-	cd $(APP_DIR) && KERYX_DEMO_DIR=$(CURDIR)/$(DEMO_SDK_DIR) KERYX_KEYSTORE=$(DEMO_SDK_KEYS_DIR) $(NPM) test
+	cd $(APP_DIR) && KERYX_DEMO_DIR=$(abspath $(DEMO_SDK_DIR)) KERYX_KEYSTORE=$(DEMO_SDK_KEYS_DIR) $(NPM) test
 
 app-icons: $(APP_DEPS_STAMP) ## Regenerate the PWA icons
 	cd $(APP_DIR) && $(NPM) run icons
