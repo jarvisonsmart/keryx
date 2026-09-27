@@ -102,12 +102,12 @@ async function waitForHeartbeat(id, timeoutMs) {
   );
   const cont = page.getByRole('button', { name: 'Continue' });
   if (await cont.count()) await cont.click();
-  await page.locator('.companybar-origin').waitFor({ timeout: 20000 });
+  await page.getByRole('button', { name: 'Settings', exact: true }).waitFor({ timeout: 20000 });
   const regs = await registrations(page);
   const id = regs.find((r) => r.baseUrl === BASE)?.id;
   if (!id) throw new Error(`no production registration for ${BASE}`);
   log(`registered ${id}`);
-  if ((await page.locator('.banner-danger').count()) !== 0) {
+  if ((await page.getByTestId('notification-danger').count()) !== 0) {
     throw new Error('red bar before the production wake-up');
   }
   log('no red bar after the enable flow');
@@ -118,7 +118,7 @@ async function waitForHeartbeat(id, timeoutMs) {
       'notify',
       '--repo', path.join(REPO_DIR, 'keryx'),
       '--channel', 'security',
-      '--company', 'keryx-demo.github.io',
+      '--company', new URL(joinUrl).hostname,
       '--relay', BASE,
       '--keystore', KEYSTORE,
     ],
@@ -131,7 +131,7 @@ async function waitForHeartbeat(id, timeoutMs) {
   const status = await waitForHeartbeat(id, 3 * 60 * 1000);
   if (status !== 204) throw new Error(`heartbeat for ${id}: ${status}`);
   log(`production wake-up heartbeat 204 for ${id}`);
-  if ((await page.locator('.banner-danger').count()) !== 0) {
+  if ((await page.getByTestId('notification-danger').count()) !== 0) {
     throw new Error('red bar after the production wake-up');
   }
   log('no red bar after the production wake-up');

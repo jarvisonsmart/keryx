@@ -25,7 +25,8 @@ const BASE = process.env.BASE ?? 'http://127.0.0.1:18099';
 const RELAY_DIR = path.join(__dirname, 'relay');
 const BIN = '/tmp/keryx-relay-harness';
 const LOG = '/tmp/keryx-relay-harness-e2e.log';
-const PROFILE = '/tmp/keryx-e2e-profile';
+const RUN_DIR = fs.mkdtempSync('/tmp/keryx-e2e-');
+const PROFILE = path.join(RUN_DIR, 'profile');
 const VAPID = JSON.parse(fs.readFileSync('/tmp/keryx-e2e-vapid.json', 'utf8'));
 
 let harness = null;
@@ -45,8 +46,9 @@ function buildHarness() {
 function startHarness() {
   fs.writeFileSync(LOG, '');
   const out = fs.openSync(LOG, 'a');
-  harness = spawn(BIN, ['-vapid-private', VAPID.private], {
+  harness = spawn(BIN, ['-vapid-private', VAPID.private, '-demo', process.env.KERYX_DEMO_DIR ?? '/tmp/keryx-demo', '-keys', process.env.KERYX_KEYSTORE ?? '/tmp/keryx-demo-keys'], {
     cwd: RELAY_DIR,
+    env: { ...process.env, TMPDIR: RUN_DIR },
     stdio: ['ignore', out, out],
   });
 }
@@ -116,7 +118,7 @@ async function registrations(page) {
 }
 
 async function noRedBar(page) {
-  return (await page.locator('.banner-danger').count()) === 0;
+  return (await page.getByTestId('notification-danger').count()) === 0;
 }
 
 async function driveEnableFlow(page, joinUrl) {
@@ -139,13 +141,13 @@ async function driveEnableFlow(page, joinUrl) {
   );
   const cont = page.getByRole('button', { name: 'Continue' });
   if (await cont.count()) await cont.click();
-  await page.locator('.companybar-origin').waitFor({ timeout: 20000 });
+  await page.getByRole('button', { name: 'Settings', exact: true }).waitFor({ timeout: 20000 });
 }
 
 (async () => {
   await stopHarness();
   fs.rmSync(PROFILE, { recursive: true, force: true });
-  for (const name of ['main', 'reg']) fs.rmSync(`/tmp/relay-harness-${name}.db`, { force: true });
+  for (const name of ['main', 'reg']) fs.rmSync(path.join(RUN_DIR, `relay-harness-${name}.db`), { force: true });
   buildHarness();
   startHarness();
   const info = await waitForInfo();
@@ -191,7 +193,7 @@ async function driveEnableFlow(page, joinUrl) {
   await new Promise((r) => setTimeout(r, 1500));
   await stopHarness();
   for (const suffix of ['', '-shm', '-wal']) {
-    fs.rmSync(`/tmp/relay-harness-reg.db${suffix}`, { force: true });
+    fs.rmSync(path.join(RUN_DIR, `relay-harness-reg.db${suffix}`), { force: true });
   }
   startHarness();
   await waitForInfo();
@@ -208,7 +210,7 @@ async function driveEnableFlow(page, joinUrl) {
   await waitForLog(/method=POST path=\/v1\/registrations status=200/, 60 * 1000, mark);
   log('fresh registration POST 200 observed');
 
-  await page.locator('.companybar-origin').waitFor({ timeout: 20000 });
+  await page.getByRole('button', { name: 'Settings', exact: true }).waitFor({ timeout: 20000 });
   const fresh = await registrations(page);
   const newId = fresh[0]?.id;
   if (!newId || newId === oldId) {

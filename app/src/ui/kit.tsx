@@ -290,7 +290,7 @@ export function Banner({ tone, text, actions }: { tone: BannerTone; text: string
   const c = useColors();
   const bg = tone === 'danger' ? c.dangerSoft : tone === 'ok' ? c.okSoft : c.surface2;
   return (
-    <View accessibilityRole="alert" style={[styles.banner, { backgroundColor: bg }]}>
+    <View accessibilityRole="alert" testID={`notification-${tone}`} style={[styles.banner, { backgroundColor: bg }]}>
       <Txt style={{ flexBasis: 160, flexGrow: 1, fontSize: 14, color: tone === 'neutral' ? c.text2 : c.text }}>{text}</Txt>
       {actions ? <View style={{ flexDirection: 'row', gap: 8 }}>{actions}</View> : null}
     </View>
