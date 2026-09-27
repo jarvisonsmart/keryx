@@ -10,7 +10,7 @@
  */
 import { getAllCompanies, getRegistration, relaySeq } from './store';
 import { topicBindings } from './relay-sw';
-import { topicAuthorization, relayBaseUrl } from './relay';
+import { topicAuthorization, relayBaseUrl, authorizationExpiresAt } from './relay';
 import { KeryxPush } from './native-push';
 import { bytesToHex } from './bytes';
 import { appPlatform } from './platform';
@@ -26,6 +26,7 @@ export async function pushVerifyState(): Promise<void> {
       topics[topic] = {
         keys: authorization.keys.map((k) => ({ keyid: k.keyid, pub: bytesToHex(k.pub) })),
         threshold: authorization.threshold,
+        expiresAt: authorizationExpiresAt(company),
         lastSeq: await relaySeq(company.origin, topic),
         // the native fallback notice's label (the locally verified display_name)
         label: binding.displayName,

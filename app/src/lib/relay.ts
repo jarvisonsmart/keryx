@@ -13,6 +13,7 @@ import { base64urlToBytes, bytesToBase64url, hexToBytes, sha256Hex } from './byt
 import { olpcCanonical } from './olpc';
 import { ed25519Verify } from './ed';
 import type { AuthorizedKey, TargetsDoc } from './tuf';
+import type { CompanyRecord } from './store';
 import { extractAuthorization } from './tuf';
 
 const encoder = new TextEncoder();
@@ -84,12 +85,13 @@ export class WakeupError extends Error {}
  * Reject duplicate JSON member names at any nesting level (§4). A minimal
  * scanner is needed because JSON.parse silently collapses duplicates.
  */
-export function hasDuplicateKeys(text: string): boolean {
+export function hasDuplicateKeys(text: string, integerFields: string[] = []): boolean {
   let i = 0;
   const ws = () => {
     while (i < text.length && /\s/.test(text[i])) i++;
   };
-  const value = (): boolean => {
+  const value = (depth = 0): boolean => {
+    if (depth > 64) throw new WakeupError('JSON nesting limit');
     ws();
     const c = text[i];
     if (c === '{') {
@@ -109,7 +111,11 @@ export function hasDuplicateKeys(text: string): boolean {
         ws();
         if (text[i] !== ':') throw new WakeupError('malformed JSON');
         i++;
-        if (value()) return true;
+        ws();
+        if (depth === 0 && integerFields.includes(key) && !/^[1-9][0-9]*(?=[\s,}])/.test(text.slice(i))) {
+          throw new WakeupError('non-integer counter encoding');
+        }
+        if (value(depth + 1)) return true;
         ws();
         if (text[i] === ',') {
           i++;
@@ -130,7 +136,7 @@ export function hasDuplicateKeys(text: string): boolean {
         return false;
       }
       for (;;) {
-        if (value()) return true;
+        if (value(depth + 1)) return true;
         ws();
         if (text[i] === ',') {
           i++;
@@ -149,28 +155,21 @@ export function hasDuplicateKeys(text: string): boolean {
   };
   const string = (): string | null => {
     if (text[i] !== '"') return null;
-    i++;
-    let out = '';
+    const start = i++;
     while (i < text.length && text[i] !== '"') {
-      if (text[i] === '\\') {
-        i += 2;
-        out += 'x';
-        continue;
-      }
-      out += text[i++];
+      if (text[i] === '\\') i++;
+      i++;
     }
     if (text[i] !== '"') return null;
-    i++;
-    return out;
+    return JSON.parse(text.slice(start, ++i)) as string;
   };
-  value();
-  return false;
+  return value();
 }
 
 /** Strictly parse the §4 wake-up envelope. */
 export function parseWakeup(data: string | ArrayBuffer | Uint8Array): Wakeup {
   const text = typeof data === 'string' ? data : new TextDecoder().decode(data);
-  if (hasDuplicateKeys(text)) throw new WakeupError('duplicate JSON member');
+  if (hasDuplicateKeys(text, ['v', 'seq'])) throw new WakeupError('duplicate JSON member');
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -206,7 +205,9 @@ export function parseWakeup(data: string | ArrayBuffer | Uint8Array): Wakeup {
     if (typeof e.keyid !== 'string' || !/^[0-9a-f]{64}$/.test(e.keyid)) {
       throw new WakeupError('sig.keyid must be 64 lowercase hex');
     }
-    if (typeof e.sig !== 'string') throw new WakeupError('sig.sig must be a string');
+    if (Object.keys(e).some((k) => k !== 'keyid' && k !== 'sig')) throw new WakeupError('unknown signature field');
+    if (typeof e.sig !== 'string' || !/^[A-Za-z0-9_-]{86}$/.test(e.sig) ||
+        bytesToBase64url(base64urlToBytes(e.sig)) !== e.sig) throw new WakeupError('noncanonical signature');
     return { keyid: e.keyid, sig: e.sig };
   });
   return { v: 1, t: obj.t, seq: obj.seq, sig };
@@ -467,4 +468,10 @@ export async function deleteRegistration(
     headers: { Authorization: `Bearer ${managementToken}` },
   });
   if (!res.ok && res.status !== 404) throw new Error(`relay delete: HTTP ${res.status}`);
+}
+
+/** Scope keys remain usable only while their signed root and targets are current. */
+export function authorizationExpiresAt(company: CompanyRecord): number {
+  const expires = Math.min(company.authorizationExpiresAt ?? 0, Date.parse(company.pinnedRoot.signed.expires), Date.parse(company.targets.signed.expires));
+  return Number.isFinite(expires) ? expires : 0;
 }

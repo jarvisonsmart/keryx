@@ -16,6 +16,7 @@ struct WakeupMirror {
     let keys: [String: Curve25519.Signing.PublicKey]
     let threshold: Int
     let label: String
+    let expiresAt: Double
     var lastSeq: Int64
     let entry: [String: Any]
   }
@@ -42,12 +43,22 @@ struct WakeupMirror {
   mutating func verify(_ payload: String) -> Accepted? {
     guard let envelope = Envelope(payload),
           var topic = topics[envelope.topic],
+          Date().timeIntervalSince1970 * 1000 < topic.expiresAt,
           envelope.seq > topic.lastSeq,
           envelope.meetsThreshold(keys: topic.keys, threshold: topic.threshold)
     else { return nil }
     topic.lastSeq = envelope.seq
     topics[envelope.topic] = topic
     return Accepted(topic: envelope.topic, label: topic.label)
+  }
+
+  mutating func preserveSequences(from previous: WakeupMirror) {
+    for (key, old) in previous.topics {
+      if var current = topics[key] {
+        current.lastSeq = max(current.lastSeq, old.lastSeq)
+        topics[key] = current
+      }
+    }
   }
 
   private static func parseTopic(_ entry: [String: Any]) -> Topic? {
@@ -65,6 +76,7 @@ struct WakeupMirror {
       keys: keys,
       threshold: max(1, (entry["threshold"] as? NSNumber)?.intValue ?? 1),
       label: entry["label"] as? String ?? "",
+      expiresAt: (entry["expiresAt"] as? NSNumber)?.doubleValue ?? 0,
       lastSeq: (entry["lastSeq"] as? NSNumber)?.int64Value ?? 0,
       entry: entry)
   }
@@ -80,18 +92,21 @@ private struct Envelope {
 
   init?(_ payload: String) {
     guard let object = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any],
-          Set(object.keys).isSubset(of: ["v", "t", "seq", "sig"]),
+          uniqueJSONMembers(payload),
+          Set(object.keys) == Set(["v", "t", "seq", "sig"]),
           jsonInteger(object["v"]) == 1,
-          let topic = object["t"] as? String, !topic.isEmpty,
+          let topic = object["t"] as? String, topic.range(of: "^[A-Za-z0-9_-]{43}$", options: .regularExpression) != nil,
           let seq = jsonInteger(object["seq"]), (1...Self.maxSeq).contains(seq),
           let list = object["sig"] as? [Any], !list.isEmpty
     else { return nil }
     var sigs: [(keyid: String, sig: String)] = []
     for item in list {
       guard let entry = item as? [String: Any],
-            Set(entry.keys).isSubset(of: ["keyid", "sig"]),
-            let keyid = (entry["keyid"] ?? "") as? String,
-            let sig = (entry["sig"] ?? "") as? String
+            Set(entry.keys) == Set(["keyid", "sig"]),
+            let keyid = entry["keyid"] as? String,
+            keyid.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil,
+            let sig = entry["sig"] as? String,
+            base64urlBytes(sig)?.count == 64
       else { return nil }
       sigs.append((keyid, sig))
     }
@@ -154,4 +169,51 @@ private func hexBytes(_ hex: String) -> Data? {
     out.append(hi << 4 | lo)
   }
   return out
+}
+
+/// Foundation collapses duplicate members; check decoded names before using its object.
+private func uniqueJSONMembers(_ json: String) -> Bool {
+  let pattern = #""(?:[^"\\]|\\[\s\S])*"|[{}\[\],:]|[^\s{}\[\],:]+"#
+  guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+  let source = json as NSString
+  let tokens = regex.matches(in: json, range: NSRange(location: 0, length: source.length))
+    .map { source.substring(with: $0.range) }
+  var index = 0
+  func value(_ depth: Int) -> Bool {
+    guard depth < 64, index < tokens.count else { return false }
+    let token = tokens[index]
+    index += 1
+    if token == "{" {
+      var names = Set<String>()
+      if index < tokens.count && tokens[index] == "}" { index += 1; return true }
+      while index < tokens.count {
+        guard let name = (try? JSONSerialization.jsonObject(with: Data(tokens[index].utf8), options: .fragmentsAllowed)) as? String,
+              names.insert(name).inserted else { return false }
+        index += 1
+        guard index < tokens.count, tokens[index] == ":" else { return false }
+        index += 1
+        if depth == 0 && (name == "v" || name == "seq") {
+          guard index < tokens.count, tokens[index].range(of: "^[1-9][0-9]*$", options: .regularExpression) != nil else { return false }
+        }
+        guard value(depth + 1), index < tokens.count else { return false }
+        let separator = tokens[index]
+        index += 1
+        if separator == "}" { return true }
+        if separator != "," { return false }
+      }
+      return false
+    }
+    if token == "[" {
+      if index < tokens.count && tokens[index] == "]" { index += 1; return true }
+      while value(depth + 1) && index < tokens.count {
+        let separator = tokens[index]
+        index += 1
+        if separator == "]" { return true }
+        if separator != "," { return false }
+      }
+      return false
+    }
+    return true
+  }
+  return value(0) && index == tokens.count
 }

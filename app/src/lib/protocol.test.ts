@@ -711,6 +711,20 @@ describe('sync failure semantics (spec/core.md §4)', () => {
     return { company, fetchTyped };
   };
 
+  it('metadata-only recovery never requests content or marks it synchronized', async () => {
+    const { company, fetchTyped } = await setup();
+    const urls: string[] = [];
+    const traced: typeof fetch = async (input, init) => {
+      urls.push(String(input));
+      return fetchTyped(input, init);
+    };
+    const result = await syncCompany(company, traced, new Map(), { metadataOnly: true });
+    expect(result.errors).toEqual([]);
+    expect(urls.some((url) => url.includes('/channels/'))).toBe(false);
+    expect(result.toPut).toEqual([]);
+    expect(result.company.lastSyncAt).toBe(company.lastSyncAt);
+  });
+
   it('a verification failure that is not a chain break does NOT suspend the company', async () => {
     const { company } = await setup();
     // serve a timestamp whose signed bytes no longer verify (a ProtocolError,

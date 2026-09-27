@@ -92,6 +92,7 @@ function company(origin: string): CompanyRecord {
       signatures: [],
     } as unknown as TargetsDoc,
     targetsVersion: 1,
+    authorizationExpiresAt: Date.parse('2099-01-01T00:00:00Z'),
     seen: { targets: 1, roles: {} },
     channels: [{ name: 'security', displayName: 'Security', followed: true }],
     privateFeeds: [],
@@ -125,6 +126,27 @@ function stubPushManager() {
   });
   return () => applicationServerKey;
 }
+
+describe('authorization lifetime and atomic replay gate', () => {
+  beforeEach(async () => {
+    for (const c of await getAllCompanies()) await deleteCompany(c.origin);
+  });
+  it('rejects a valid signature under expired targets without advancing replay state', async () => {
+    const origin = newOrigin();
+    const c = company(origin);
+    c.targets.signed.expires = '2000-01-01T00:00:00Z';
+    await putCompany(c);
+    const outcome = await handlePush(JSON.stringify(fixture.wakeup));
+    expect(outcome.accepted).toBe(false);
+    expect(await relaySeq(origin, fixture.topic)).toBe(0);
+  });
+  it('accepts only one of two simultaneous copies', async () => {
+    const origin = newOrigin();
+    await putCompany(company(origin));
+    const results = await Promise.all([handlePush(JSON.stringify(fixture.wakeup)), handlePush(JSON.stringify(fixture.wakeup))]);
+    expect(results.filter((r) => r.accepted)).toHaveLength(1);
+  });
+});
 
 describe('app-wide registration store', () => {
   it('keeps one registration per relay base URL', async () => {

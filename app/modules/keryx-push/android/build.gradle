@@ -12,6 +12,9 @@ android {
     versionCode 1
     versionName "0.1.0"
   }
+  testOptions.unitTests.all {
+    systemProperty "keryx.fixture", file("../../../src/lib/__fixtures__/relay-e2e.json").absolutePath
+  }
   lintOptions {
     abortOnError false
   }
@@ -26,5 +29,7 @@ dependencies {
   implementation "com.google.android.gms:play-services-base:18.11.0"
   // Ed25519 verification for the native §4 envelope gate (Java has none before API 33)
   implementation "org.bouncycastle:bcprov-jdk18on:1.86"
+  implementation "com.google.code.gson:gson:2.13.2"
   testImplementation "junit:junit:4.13.2"
+  testImplementation "org.json:json:20180813"
 }

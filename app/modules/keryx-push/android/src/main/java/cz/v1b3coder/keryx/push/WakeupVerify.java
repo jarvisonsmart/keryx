@@ -1,7 +1,5 @@
 package cz.v1b3coder.keryx.push;
 
-import android.util.Base64;
-
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters;
 import org.bouncycastle.crypto.signers.Ed25519Signer;
 import org.json.JSONArray;
@@ -31,15 +29,17 @@ public final class WakeupVerify {
         public final String[] pubHex;
         public final int threshold;
         public final String label;
+        public final long expiresAt;
         public long lastSeq;
 
-        public TopicState(String topic, String[] keyids, byte[][] pubs, String[] pubHex, int threshold, String label, long lastSeq) {
+        public TopicState(String topic, String[] keyids, byte[][] pubs, String[] pubHex, int threshold, String label, long expiresAt, long lastSeq) {
             this.topic = topic;
             this.keyids = keyids;
             this.pubs = pubs;
             this.pubHex = pubHex;
             this.threshold = threshold;
             this.label = label;
+            this.expiresAt = expiresAt;
             this.lastSeq = lastSeq;
         }
     }
@@ -92,6 +92,7 @@ public final class WakeupVerify {
                             pubHex,
                             Math.max(1, t.optInt("threshold", 1)),
                             t.optString("label", ""),
+                            t.optLong("expiresAt", 0),
                             t.optLong("lastSeq", 0)));
         }
     }
@@ -118,6 +119,7 @@ public final class WakeupVerify {
                 topic.put("threshold", state.threshold);
                 topic.put("lastSeq", state.lastSeq);
                 topic.put("label", state.label);
+                topic.put("expiresAt", state.expiresAt);
                 topicsJson.put(entry.getKey(), topic);
             } catch (Exception e) {
                 // impossible for a JSONObject of JSON-safe values
@@ -142,7 +144,7 @@ public final class WakeupVerify {
     public synchronized TopicState verify(String payload) {
         JSONObject envelope;
         try {
-            envelope = new JSONObject(payload);
+            envelope = WakeupEnvelope.parse(payload);
         } catch (Exception e) {
             return null;
         }
@@ -152,7 +154,7 @@ public final class WakeupVerify {
         JSONArray sigs = envelope.optJSONArray("sig");
         if (topic.isEmpty() || seq < 1 || sigs == null || sigs.length() == 0) return null;
         TopicState state = topics.get(topic);
-        if (state == null) return null;
+        if (state == null || System.currentTimeMillis() >= state.expiresAt) return null;
         if (seq <= state.lastSeq) return null;
         // the signed bytes are exactly wakeup.go's SignedBytes: the OLPC canonical
         // form sorts keys `seq`, `t`, `v`; the topic is base64url, so no escaping
@@ -209,6 +211,6 @@ public final class WakeupVerify {
 
     /** base64url (unpadded) → bytes; throws on malformed input. */
     private static byte[] base64urlToBytes(String value) {
-        return Base64.decode(value, Base64.URL_SAFE | Base64.NO_PADDING | Base64.NO_WRAP);
+        return WakeupEnvelope.decodeSignature(value);
     }
 }

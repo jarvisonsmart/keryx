@@ -50,6 +50,8 @@ export interface CompanyRecord {
   pinnedRootVersion: number;
   targets: TargetsDoc;
   targetsVersion: number;
+  /** Earliest expiry of the verified root/timestamp/snapshot/targets chain. */
+  authorizationExpiresAt?: number;
   /** anti-rollback version memory */
   seen: SeenVersions;
   channels: ChannelState[];
@@ -216,8 +218,11 @@ export async function relaySeq(origin: string, topic: string): Promise<number> {
 }
 
 /** Persist the last accepted `seq` for a topic (verified wake-ups only). */
-export async function setRelaySeq(origin: string, topic: string, seq: number): Promise<void> {
-  await db.putMany('relay', [{ key: `seq\u0000${origin}\u0000${topic}`, seq }]);
+export async function setRelaySeq(origin: string, topic: string, seq: number): Promise<boolean> {
+  const key = `seq\u0000${origin}\u0000${topic}`;
+  return db.update<RelayStateRecord>('relay', key, (current) =>
+    seq > (current?.seq ?? 0) ? { key, seq } : undefined,
+  );
 }
 
 /** The recovery-cooldown expiry for a company (0 when never attempted). */
@@ -254,6 +259,7 @@ export interface PendingRecovery {
   topic: string;
   seq: number;
   at: number;
+  payload?: string;
 }
 
 /**

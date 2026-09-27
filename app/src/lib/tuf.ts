@@ -415,6 +415,13 @@ export interface MetadataResult {
   stale: boolean;
 }
 
+/** The entire verified authorization chain must remain current. */
+export function metadataExpiresAt(meta: MetadataResult): number {
+  const expires = Math.min(...[meta.root, meta.timestamp, meta.snapshot, meta.targets]
+    .map((doc) => Date.parse(doc.signed.expires)));
+  return Number.isFinite(expires) ? expires : 0;
+}
+
 /**
  * Fetch and verify the TUF chain up to targets: root (walked from the
  * pinned anchor) → timestamp → snapshot → targets. Channel role metadata is

@@ -9,6 +9,7 @@
 
 import {
   loadAndVerifyMetadata,
+  metadataExpiresAt,
   loadChannelRole,
   extractAuthorization,
   targetFileUrl,
@@ -212,6 +213,7 @@ export async function syncCompany(
   company: CompanyRecord,
   fetchFn: typeof fetch = fetch,
   existingItems?: Map<string, StoredItem>,
+  options: { metadataOnly?: boolean } = {},
 ): Promise<SyncOutcome> {
   const errors: string[] = [];
   let suspended = false;
@@ -237,7 +239,7 @@ export async function syncCompany(
         ...company,
         status: suspended ? 'suspended' : company.status,
         suspendedReason: suspended ? errors[0] : company.suspendedReason,
-        lastSyncAt: Date.now(),
+        lastSyncAt: options.metadataOnly ? company.lastSyncAt : Date.now(),
         lastSyncErrors: errors.slice(0, 8),
       },
       newItems: 0,
@@ -309,10 +311,11 @@ export async function syncCompany(
     pinnedRootVersion: root.signed.version,
     targets,
     targetsVersion: targets.signed.version,
+    authorizationExpiresAt: metadataExpiresAt(meta),
     seen,
     channels,
     status: 'active',
-    lastSyncAt: Date.now(),
+    lastSyncAt: options.metadataOnly ? company.lastSyncAt : Date.now(),
   };
 
   if (suspended) {
@@ -334,6 +337,10 @@ export async function syncCompany(
       toPut: [],
       toDelete: [],
     };
+  }
+
+  if (options.metadataOnly) {
+    return { company: updated, newItems, rejected, suspended, errors, toPut: [], toDelete: [] };
   }
 
   const existing = existingItems ?? new Map<string, StoredItem>();

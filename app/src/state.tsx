@@ -11,9 +11,6 @@ import {
   getCompany,
   lastPushAt,
   pendingTest,
-  pendingRecoveries,
-  clearPendingRecovery,
-  reserveRecovery,
   putCompany,
   putItems,
   deleteItems,
@@ -29,7 +26,7 @@ import {
   FOREGROUND_CHECK_INTERVAL_MS,
   handlePush,
   heartbeatRelay,
-  RECOVERY_COOLDOWN_MS,
+  recoverPendingWakeups,
   setSubscriptionSource,
 } from './lib/relay-sw';
 import { relayBaseUrl, vapidPublicKey } from './lib/relay';
@@ -148,30 +145,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
     itemsRef.current = applyOutcomeItems(itemsRef.current, origin, existing);
   };
 
+  const activeSyncs = useRef(new Map<string, Promise<void>>());
+
   /** One content reconciliation from the page (never the worker). */
   const syncCompanyNow = useCallback(
-    async (origin: string) => {
-      setSyncing(true);
-      try {
-        const company = await getCompany(origin);
-        if (!company) return;
-        const existing = new Map(
-          itemsRef.current.filter((i) => i.origin === origin).map((i) => [i.id, i]),
-        );
-        const outcome = await syncCompany(company, netFetch, existing);
-        applyOutcome(origin, existing);
-        await putCompany(outcome.company);
-        if (outcome.toPut.length > 0) await putItems(outcome.toPut);
-        if (outcome.toDelete.length > 0) await deleteItems(outcome.toDelete);
-        void heartbeatRelay(outcome.company.origin);
-        const list = await getAllCompanies();
-        setCompanies(list);
-        // the app-wide state may have changed (a test landed, a leg died)
-        await refreshNotificationState();
-        await pushVerifyState();
-      } finally {
-        setSyncing(false);
-      }
+    (origin: string): Promise<void> => {
+      const active = activeSyncs.current.get(origin);
+      if (active) return active;
+      const work = (async () => {
+        setSyncing(true);
+        try {
+          const company = await getCompany(origin);
+          if (!company) return;
+          const existing = new Map(
+            itemsRef.current.filter((i) => i.origin === origin).map((i) => [i.id, i]),
+          );
+          const outcome = await syncCompany(company, netFetch, existing);
+          applyOutcome(origin, existing);
+          await putCompany(outcome.company);
+          if (outcome.toPut.length > 0) await putItems(outcome.toPut);
+          if (outcome.toDelete.length > 0) await deleteItems(outcome.toDelete);
+          void heartbeatRelay(outcome.company.origin);
+          const list = await getAllCompanies();
+          setCompanies(list);
+          // the app-wide state may have changed (a test landed, a leg died)
+          await refreshNotificationState();
+          await pushVerifyState();
+        } finally {
+          setSyncing(false);
+        }
+      })().finally(() => { activeSyncs.current.delete(origin); });
+      activeSyncs.current.set(origin, work);
+      return work;
     },
     [refreshNotificationState],
   );
@@ -183,14 +188,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
    * allowance.
    */
   const drainPendingRecoveries = useCallback(async () => {
-    for (const pending of await pendingRecoveries()) {
-      if (!(await reserveRecovery(pending.origin, Date.now(), RECOVERY_COOLDOWN_MS))) {
-        await clearPendingRecovery(pending.origin);
-        continue; // within the cooldown: metadata was refreshed recently
+    for (const outcome of await recoverPendingWakeups(netFetch)) {
+      const title = outcome.title ?? 'Keryx';
+      const body = outcome.body ?? 'New update available';
+      const tag = `keryx-${outcome.topic}`;
+      if (appPlatform() === 'web') {
+        const registration = await navigator.serviceWorker.ready;
+        await registration.showNotification(title, { body, tag });
+      } else {
+        await KeryxPush.showNotification({ title, body, tag });
       }
-      await syncCompanyNow(pending.origin);
-      await clearPendingRecovery(pending.origin);
+      if (outcome.origin) await syncCompanyNow(outcome.origin);
     }
+    setCompanies(await getAllCompanies());
+    await pushVerifyState();
   }, [syncCompanyNow]);
 
   /**
@@ -329,25 +340,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const actions = useMemo<AppActions>(
     () => ({
       async refreshAll() {
-        setSyncing(true);
-        try {
-          for (const company of companies) {
-            const existing = new Map(itemsRef.current.filter((i) => i.origin === company.origin).map((i) => [i.id, i]));
-            const outcome = await syncCompany(company, netFetch, existing);
-            applyOutcome(company.origin, existing);
-            await putCompany(outcome.company);
-            if (outcome.toPut.length > 0) await putItems(outcome.toPut);
-            if (outcome.toDelete.length > 0) await deleteItems(outcome.toDelete);
-            void heartbeatRelay(outcome.company.origin);
-          }
-          const list = await getAllCompanies();
-          setCompanies(list);
-          // the app-wide state may have changed (a test landed, a leg died)
-          await refreshNotificationState();
-          await pushVerifyState();
-        } finally {
-          setSyncing(false);
-        }
+        for (const company of await getAllCompanies()) await syncCompanyNow(company.origin);
       },
       syncCompanyNow,
       async toggleChannel(origin, channel, followed) {

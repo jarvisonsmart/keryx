@@ -81,7 +81,11 @@ final class KeryxPushCore {
   }
 
   func setVerifyState(_ json: String) {
-    lock.withLock { defaults.set(json, forKey: Key.verifyState) }
+    lock.withLock {
+      var next = WakeupMirror(json: json)
+      next.preserveSequences(from: WakeupMirror(json: defaults.string(forKey: Key.verifyState)))
+      defaults.set(next.json, forKey: Key.verifyState)
+    }
   }
 
   func setRegistration(_ json: String?) {

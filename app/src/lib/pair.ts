@@ -8,6 +8,7 @@
 import { parseJoinUrl, rootAnchorUrl, type JoinPayload } from './payload';
 import {
   loadAndVerifyMetadata,
+  metadataExpiresAt,
   extractAuthorization,
   ChainBreakError,
   ProtocolError,
@@ -44,6 +45,7 @@ export interface PairingOffer {
 }
 
 interface PairingMeta {
+  expiresAt: number;
   root: RootDoc;
   targets: TargetsDoc;
   base: string;
@@ -119,6 +121,7 @@ export async function buildPairingOffer(
     channels: offerChannels,
     privateFeeds,
     _meta: {
+      expiresAt: metadataExpiresAt(meta),
       root: meta.root,
       targets: meta.targets,
       base: meta.base,
@@ -144,11 +147,13 @@ export function createCompanyFromOffer(offer: PairingOffer, followed: string[]):
       displayName: f.displayName,
       purpose: f.purpose,
     }));
-  return makeCompany(offer.origin, offer.joinUrl, offer._meta.root, offer._meta.targets, {
+  const company = makeCompany(offer.origin, offer.joinUrl, offer._meta.root, offer._meta.targets, {
     companyName: offer.companyName,
     logo: offer.logo,
     logoSHA256: offer.logoSHA256,
   }, channels, privateFeeds);
+  company.authorizationExpiresAt = offer._meta.expiresAt;
+  return company;
 }
 
 export { parseJoinUrl, rootAnchorUrl };

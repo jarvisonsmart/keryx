@@ -90,7 +90,16 @@ object KeryxPushCore {
   // --- the verification mirror and the ack credentials ------------------------
 
   fun setVerifyState(context: Context, json: String) {
-    prefs(context).edit().putString(VERIFY_KEY, json).apply()
+    synchronized(lock) {
+      val next = JSONObject(json)
+      val previous = runCatching { JSONObject(prefs(context).getString(VERIFY_KEY, "{}")!!).optJSONObject("topics") }.getOrNull()
+      val topics = next.optJSONObject("topics")
+      topics?.keys()?.forEach { topic ->
+        val entry = topics.getJSONObject(topic)
+        entry.put("lastSeq", maxOf(entry.optLong("lastSeq"), previous?.optJSONObject(topic)?.optLong("lastSeq") ?: 0))
+      }
+      prefs(context).edit().putString(VERIFY_KEY, next.toString()).apply()
+    }
   }
 
   fun setRegistration(context: Context, json: String?) {
@@ -118,14 +127,17 @@ object KeryxPushCore {
    * (then the page owns verification, recovery and sync).
    */
   fun onMessage(context: Context, payload: String) {
-    val verify = WakeupVerify()
-    try {
-      verify.setState(JSONObject(prefs(context).getString(VERIFY_KEY, "{}")!!))
-    } catch (_: Exception) {
-      // a corrupt mirror verifies nothing: the wake-up is queued for the page
+    val state = synchronized(lock) {
+      val verify = WakeupVerify()
+      try {
+        verify.setState(JSONObject(prefs(context).getString(VERIFY_KEY, "{}")!!))
+      } catch (_: Exception) {
+        // a corrupt mirror verifies nothing: the wake-up is queued for the page
+      }
+      val accepted = verify.verify(payload)
+      if (accepted != null) setVerifyState(context, verify.toJson().toString())
+      accepted
     }
-    val state = verify.verify(payload)
-    if (state != null) setVerifyState(context, verify.toJson().toString())
     enqueue(context, payload)
     val deliver = listener
     if (state == null) {

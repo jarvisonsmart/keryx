@@ -17,6 +17,10 @@ declare const self: ServiceWorkerGlobalScope;
 
 import {
   getAllCompanies,
+  getCompany,
+  pendingRecoveries,
+  clearPendingRecovery,
+  reserveRecovery,
   getAllItems,
   putCompany,
   putItems,
@@ -40,6 +44,7 @@ import {
   parseWakeup,
   verifyWakeup,
   topicAuthorization,
+  authorizationExpiresAt,
   deriveTopic,
   sourceHash,
   publicScopeId,
@@ -173,7 +178,7 @@ export interface PushOutcome {
  * when the wake-up is dropped without a content fetch. Replay state is never
  * advanced from an unverified message.
  */
-export async function handlePush(data: string | ArrayBuffer | Uint8Array): Promise<PushOutcome> {
+export async function handlePush(data: string | ArrayBuffer | Uint8Array, allowRecovery = true): Promise<PushOutcome> {
   // a §4.3 self-test is never a wake-up: it only records receipt
   const maybeTest = testPayloadOf(data);
   if (maybeTest) {
@@ -192,20 +197,20 @@ export async function handlePush(data: string | ArrayBuffer | Uint8Array): Promi
   const { company, binding } = found;
 
   const authorization = topicAuthorization(company.targets, binding);
-  if (!authorization || !verifyWakeup(wakeup, authorization.keys, authorization.threshold)) {
+  if (Date.now() >= authorizationExpiresAt(company) || !authorization || !verifyWakeup(wakeup, authorization.keys, authorization.threshold)) {
     // The worker does no TUF metadata or content work (design/notifications.md,
     // "Worker-side processing"): a failed verification may just mean the cached
     // metadata is stale after a key rotation, so record the wake-up for the page —
     // which re-verifies with the full TUF state and its recovery allowance — and
     // never notify on it here.
-    await markPendingRecovery({ origin: company.origin, topic: wakeup.t, seq: wakeup.seq, at: Date.now() });
-    return { accepted: false, pendingRecovery: true };
+    if (allowRecovery) {
+      await markPendingRecovery({ origin: company.origin, topic: wakeup.t, seq: wakeup.seq, at: Date.now(), payload: JSON.stringify(wakeup) });
+    }
+    return { accepted: false, pendingRecovery: allowRecovery };
   }
 
   // Only after successful verification: atomically compare and persist `seq`.
-  const last = await relaySeq(company.origin, wakeup.t);
-  if (wakeup.seq <= last) return { accepted: false }; // replay
-  await setRelaySeq(company.origin, wakeup.t, wakeup.seq);
+  if (!(await setRelaySeq(company.origin, wakeup.t, wakeup.seq))) return { accepted: false };
   await markPushReceived(company.origin, Date.now());
 
   // The liveness/delivery ack (§5.3): the worker keeps this one call, but it
@@ -230,12 +235,46 @@ export async function handlePush(data: string | ArrayBuffer | Uint8Array): Promi
   };
 }
 
+/** Persisted global budget: one metadata-only recovery per minute, one at a time. */
+export const RECOVERY_GLOBAL_INTERVAL_MS = 60_000;
+let recovering: Promise<PushOutcome[]> | null = null;
+
+export function recoverPendingWakeups(fetchFn: typeof fetch = fetch): Promise<PushOutcome[]> {
+  if (recovering) return recovering;
+  recovering = (async () => {
+    const accepted: PushOutcome[] = [];
+    for (const pending of await pendingRecoveries()) {
+      const company = await getCompany(pending.origin);
+      if (!company || !pending.payload) {
+        await clearPendingRecovery(pending.origin);
+        continue;
+      }
+      // Retry cached keys first: an ordinary sync may already have learned a rotation.
+      let outcome = await handlePush(pending.payload, false);
+      if (!outcome.accepted) {
+        if (!(await reserveRecovery('global-push-recovery', Date.now(), RECOVERY_GLOBAL_INTERVAL_MS))) break;
+        await clearPendingRecovery(pending.origin);
+        if (await reserveRecovery(pending.origin, Date.now(), RECOVERY_COOLDOWN_MS)) {
+          const refreshed = await syncCompany(company, fetchFn, undefined, { metadataOnly: true });
+          if (await getCompany(pending.origin)) await putCompany(refreshed.company);
+          outcome = await handlePush(pending.payload, false);
+        }
+      } else {
+        await clearPendingRecovery(pending.origin);
+      }
+      if (outcome.accepted) accepted.push(outcome);
+    }
+    return accepted;
+  })().finally(() => { recovering = null; });
+  return recovering;
+}
+
 /** Parse a §4.3 self-test payload, or null when it is not one. */
 function testPayloadOf(data: string | ArrayBuffer | Uint8Array): { v: number; test: true; nonce: string } | null {
   const text = typeof data === 'string' ? data : new TextDecoder().decode(data);
-  if (hasDuplicateKeys(text)) return null;
   let parsed: unknown;
   try {
+    if (hasDuplicateKeys(text)) return null;
     parsed = JSON.parse(text);
   } catch {
     return null;

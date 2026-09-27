@@ -81,6 +81,18 @@ describe('topic derivation (relay/SPECIFICATION.md §3)', () => {
 });
 
 describe('wake-up envelope (relay/SPECIFICATION.md §4)', () => {
+  it('rejects duplicate members even when escaped or nested, and malformed extra signatures', () => {
+    const good = JSON.stringify(fixture.wakeup);
+    expect(() => parseWakeup(good.replace('"v":1', '"v":1,"v":1'))).toThrow();
+    for (const value of ['1.0', '1e0', 'true', '"1"']) {
+      expect(() => parseWakeup(good.replace('"v":1', `"v":${value}`))).toThrow();
+    }
+    expect(() => parseWakeup(good.replace('"v":1', '"v":1,"\\u0076":1'))).toThrow();
+    expect(() => parseWakeup(good.replace('"keyid":', '"keyid":"ignored","keyid":'))).toThrow();
+    expect(() => parseWakeup(JSON.stringify({ ...fixture.wakeup, sig: [...fixture.wakeup.sig, { keyid: 'f'.repeat(64), sig: 'bad' }] }))).toThrow();
+    expect(() => parseWakeup(JSON.stringify({ ...fixture.wakeup, sig: fixture.wakeup.sig.map((s) => ({ ...s, extra: true })) }))).toThrow();
+  });
+
   it('signs exactly the domain-separated OLPC of {v, t, seq}', () => {
     const bytes = new TextDecoder().decode(wakeupSignedBytes(1, 'abc', 7));
     expect(bytes).toBe('keryx/wakeup/v1|{"seq":7,"t":"abc","v":1}');
