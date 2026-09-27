@@ -41,6 +41,9 @@ subscribe) → subscribe → verified inbox.
 > permit no cleartext at all via `network_security_config.xml`, see
 > `plugins/with-keryx-android.js`). A real deployment uses the company's
 > HTTPS origin.
+> Debug Android permits cleartext only on localhost, loopback and the emulator
+> host (10.0.2.2). To use a LAN demo, set `KERYX_DEV_HOSTS=192.168.1.20`
+> during prebuild; only explicit RFC 1918 IPv4 addresses are accepted.
 
 ## Deployment
 
@@ -160,7 +163,8 @@ once onto the new build (`src/pwa.ts`).
   read when they scroll into view.
 - **Offline-first** — local cache of pinned metadata + verified items + media
   bytes (IndexedDB on the web, shared with the service worker; SQLite on the
-  apps — `src/lib/db*.ts`); sync on open + manual refresh.
+  apps — `src/lib/db*.ts`); sync on open/foreground and once a minute while
+  active when the last attempt is at least five minutes old, plus manual refresh.
 - **Wake-ups (relay/SPECIFICATION.md §4.2)** — the app derives the same topic
   as the relay (`keryx/relay/v1|` + OLPC `{company_id, scope_id, h}`), registers
   the installation's WebPush subscription with the relay (§5.3) and keeps the
@@ -171,7 +175,12 @@ once onto the new build (`src/pwa.ts`).
   authored generic notice — never unverified content. The worker does no TUF
   metadata or content network work: an unverifiable wake-up is recorded for the
   page, which re-verifies with the full TUF state under its recovery
-  allowance and owns the content sync. The registration is **app-wide**: one
+  allowance and owns the content sync. Recovery is metadata-only, followed by
+  retrying the signed envelope; it cannot fetch content before verification.
+  The persisted allowance is six hours per company, with a global limit of
+  one recovery per minute and one in flight. Pending storage holds one envelope
+  per company. Ordinary foreground refresh is independent of this allowance.
+  The registration is **app-wide**: one
   permission, one push subscription, one relay record holding the union of every
   followed company's topics (see
   [`../design/notifications.md`](../design/notifications.md)). Configure
@@ -356,3 +365,20 @@ semantic red for destructive actions only. The app's own branding is
 suppressed — the company identity (logo + name + join origin) carries the
 screen; the feed shows full articles with big square preview images; the
 single-company shortcut (no contacts list when only one source is added).
+
+For a local Pages-layout check, build with `EXPO_BASE_URL=/keryx/ npm run build`,
+then run `EXPO_BASE_URL=/keryx/ npm run preview` and open `/keryx/`.
+
+The Swift envelope gate can also be checked against the same Go-signed fixture
+as Java and TypeScript, without APNs credentials:
+
+```sh
+swiftc modules/keryx-push/ios/WakeupVerify.swift modules/keryx-push/tests/main.swift -o /tmp/keryx-swift-gate
+/tmp/keryx-swift-gate src/lib/__fixtures__/relay-e2e.json
+```
+
+With the preview running, the repository-root `e2e-update.cjs` driver checks
+first installation and two subsequent service-worker updates in the same Firefox
+tab. Run it with Playwright on `NODE_PATH` and set `APP` to the preview URL
+(including `/keryx/` when testing that base). It restores the generated `dist/sw.js`
+after the check.
