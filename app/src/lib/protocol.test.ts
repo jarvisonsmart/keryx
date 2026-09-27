@@ -740,7 +740,7 @@ describe('sync failure semantics (spec/core.md §4)', () => {
     expect(cache.has(victim.id)).toBe(false);
   });
 
-  it('rechecks cached signatures when channel role metadata is unavailable', async () => {
+  it.each([false, true])('rechecks cached signatures without channel metadata (metadataOnly=%s)', async (metadataOnly) => {
     const { company, fetchTyped } = await setup();
     const before = await syncCompany(company, fetchTyped, new Map());
     const cache = new Map(before.toPut.map((item) => [item.id, structuredClone(item)]));
@@ -750,7 +750,7 @@ describe('sync failure semantics (spec/core.md §4)', () => {
       if (String(input).includes('channels.')) return new Response('', { status: 503 });
       return fetchTyped(input, init);
     };
-    const after = await syncCompany(before.company, unavailable, cache);
+    const after = await syncCompany(before.company, unavailable, cache, { metadataOnly });
     expect(after.toDelete).toContain(victim.id);
     expect(cache.has(victim.id)).toBe(false);
   });

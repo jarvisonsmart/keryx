@@ -216,6 +216,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       if (outcome.origin) await syncCompanyNow(outcome.origin);
     }
+    itemsRef.current = await getAllItems();
     setCompanies(await getAllCompanies());
     await pushVerifyState();
   }, [syncCompanyNow]);

@@ -339,10 +339,6 @@ export async function syncCompany(
     };
   }
 
-  if (options.metadataOnly) {
-    return { company: updated, newItems, rejected, suspended, errors, toPut: [], toDelete: [] };
-  }
-
   const existing = existingItems ?? new Map<string, StoredItem>();
   const toPut: StoredItem[] = [];
   const toDelete: string[] = [];
@@ -359,6 +355,10 @@ export async function syncCompany(
       toDelete.push(key);
       rejected++;
     }
+  }
+
+  if (options.metadataOnly) {
+    return { company: updated, newItems, rejected, suspended, errors, toPut, toDelete };
   }
 
   // --- 4. public channels: one hash-pinned item file per TUF target ------

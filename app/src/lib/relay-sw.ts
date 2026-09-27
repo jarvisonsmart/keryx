@@ -253,8 +253,9 @@ export function recoverPendingWakeups(fetchFn: typeof fetch = fetch): Promise<Pu
         if (!(await reserveRecovery('global-push-recovery', Date.now(), RECOVERY_GLOBAL_INTERVAL_MS))) break;
         await clearPendingRecovery(pending.origin);
         if (await reserveRecovery(pending.origin, Date.now(), RECOVERY_COOLDOWN_MS)) {
-          const refreshed = await syncCompany(company, fetchFn, undefined, { metadataOnly: true });
-          await commitSync(company, refreshed.company);
+          const existing = new Map((await getAllItems()).filter((item) => item.origin === company.origin).map((item) => [item.id, item]));
+          const refreshed = await syncCompany(company, fetchFn, existing, { metadataOnly: true });
+          await commitSync(company, refreshed.company, refreshed.toPut, refreshed.toDelete);
           outcome = await handlePush(pending.payload, false);
         }
       } else {
