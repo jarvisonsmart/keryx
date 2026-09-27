@@ -157,3 +157,9 @@ Demo section), or verify it with `make demo-verify`.
 
 See `make help` for the full task list (builds, tests, the relay and the Android
 APK).
+
+---
+
+## License
+
+GPL-3.0 — see [LICENSE](LICENSE).
