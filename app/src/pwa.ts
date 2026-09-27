@@ -17,10 +17,14 @@ export function registerServiceWorker(): void {
         });
         // reload once when a new worker takes control, but never on the first
         // install (there was no controller to replace)
-        const hadController = !!navigator.serviceWorker.controller;
+        let hadController = !!navigator.serviceWorker.controller;
         let reloading = false;
         navigator.serviceWorker.addEventListener('controllerchange', () => {
-          if (!hadController || reloading) return;
+          if (!hadController) {
+            hadController = true;
+            return;
+          }
+          if (reloading) return;
           reloading = true;
           window.location.reload();
         });
